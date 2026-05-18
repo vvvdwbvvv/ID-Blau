@@ -13,7 +13,7 @@ import sys
 import numpy as np
 from dataloader import Flow_Loader
 from models.diffusion_model import UNet
-from models.diffusion_network import DDIM, DDPM
+from models.diffusion_network import DDIM, DDPM, FlowMatching
 from utils.set_condition import select_condition_strategy
 from utils.flow_viz import flow_to_image
 from utils.utils import same_seed, count_parameters, tensor2cv, AverageMeter, judge_and_remove_module_dict
@@ -40,8 +40,10 @@ def valid(model, dataloader_val, sample_timesteps, device, valid_iters=None, tit
         blur, sharp = sample['blur'].to(device), sample['sharp'].to(device)
         flow = sample['flow'].to(device)
         condition = torch.cat([sharp, flow], dim=1)
-        if args.model == "DDIM":
-                output = model.sample(condition=condition, sample_timesteps=sample_timesteps, device=device, tqdm_visible=False)
+        if args.model == "FlowMatching":
+            output = model.sample(condition=condition, x0=sharp, sample_timesteps=sample_timesteps, device=device, tqdm_visible=False)
+        elif args.model == "DDIM":
+            output = model.sample(condition=condition, sample_timesteps=sample_timesteps, device=device, tqdm_visible=False)
         elif args.model == "DDPM":
             output = model.sample(condition=condition, device=device, tqdm_visible=True)
         output = output.clamp(-0.5, 0.5)
@@ -86,7 +88,9 @@ def val_save_image(model, dir_path, dataset, sample_timesteps, val_num=3, val_id
             sharp = sample['sharp'].unsqueeze(0).to(device)
             flow = sample['flow'].unsqueeze(0).to(device)
             condition = torch.cat([sharp, flow], dim=1)
-            if args.model == "DDIM":
+            if args.model == "FlowMatching":
+                output = model.sample(condition=condition, x0=sharp, sample_timesteps=sample_timesteps, device=device, tqdm_visible=True)
+            elif args.model == "DDIM":
                 output = model.sample(condition=condition, sample_timesteps=sample_timesteps, device=device, tqdm_visible=True)
             elif args.model == "DDPM":
                 output = model.sample(condition=condition, device=device, tqdm_visible=True)
@@ -163,7 +167,7 @@ def generate_dataset(model, dir_path, dataset, sample_timesteps, strategySetting
                     strategy = [strategy_list[(idx + index) % len(strategy_list)]]
                 new_flow = select_condition_strategy(flow, strategy=strategy, choice_num=choice_num, change_base=change_base)#, strategy
                 condition = torch.cat([sharp, new_flow], dim=1)
-                output = model.sample(condition=condition, sample_timesteps=sample_timesteps, device=device)
+                output = model.sample(condition=condition, x0=sharp, sample_timesteps=sample_timesteps, device=device)
                 output = output.clamp(-0.5, 0.5)  # [B, C, H, W]
 
                 save_img_path = os.path.join(blur_idx_path, f'{index:05d}.png')
@@ -189,7 +193,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_path", default=None, type=str)
     parser.add_argument("--flow_data_path",default="./dataset/GOPRO_flow",type=str)
     parser.add_argument("--flow_norm",default=True,type=bool)
-    parser.add_argument("--model", default='DDIM', type=str)
+    parser.add_argument("--model", default='FlowMatching', type=str)
     parser.add_argument("--title", default='None', type=str)
     parser.add_argument("--type", default='generate_dataset', type=str, choices=['generate_dataset', 'image'] + pyiqa.list_models())
     parser.add_argument("--dataset", default='train', type=str, choices=['train', 'test'])
@@ -238,8 +242,6 @@ if __name__ == "__main__":
     # val_idxs = [i for i, item in enumerate(dataset.blur_list) if any(substr in item for substr in search_str)]
 
 
-    beta = generate_linear_schedule(
-        model_args.num_timesteps, model_args.beta_1, model_args.beta_T)
     model_UNet = UNet(
         channel_mults=model_args.channel_mults,
         base_channels=model_args.base_channels,
@@ -247,9 +249,21 @@ if __name__ == "__main__":
         dropout=model_args.dropout
         ).to(device)
     
-    if args.model == "DDIM":
+    if args.model == "FlowMatching":
+        diffusionModel = FlowMatching(
+            model_UNet,
+            img_channels=3,
+            criterion=getattr(model_args, "criterion", "l1"),
+            device=device,
+            sample_steps=args.sample_timesteps,
+        )
+    elif args.model == "DDIM":
+        beta = generate_linear_schedule(
+            model_args.num_timesteps, model_args.beta_1, model_args.beta_T)
         diffusionModel = DDIM(model_UNet, img_channels=9, betas=beta).to(device)
     elif args.model == "DDPM":
+        beta = generate_linear_schedule(
+            model_args.num_timesteps, model_args.beta_1, model_args.beta_T)
         diffusionModel = DDPM(model_UNet, img_channels=9, betas=beta).to(device)
     else:
         raise ValueError(f"model not supported {args.model}")
