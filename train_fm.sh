@@ -8,6 +8,7 @@ set -eo pipefail
 
 module purge
 module load miniconda3
+eval "$(conda shell.bash hook)"
 conda activate IDBlau
 
 cd "${SLURM_SUBMIT_DIR:-$HOME/ID-Blau}"
@@ -18,12 +19,6 @@ echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURMD_NODENAME"
 echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 nvidia-smi
-
-source ~/.bashrc
-
-if command -v conda >/dev/null 2>&1; then
-  conda activate IDBlau
-fi
 
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 
