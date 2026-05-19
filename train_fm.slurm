@@ -2,14 +2,16 @@
 #SBATCH --job-name=idblau-fm
 #SBATCH --output=logs/%x-%j.out
 #SBATCH --error=logs/%x-%j.err
+#SBATCH --account=MST114139
+#SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=128G
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 
-set -e
+set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:-$HOME/ID-Blau}"
 
@@ -27,6 +29,60 @@ if command -v conda >/dev/null 2>&1; then
 fi
 
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+
+mkdir -p dataset
+
+download_if_missing() {
+  local url="$1"
+  local output="$2"
+  if [ ! -f "$output" ]; then
+    echo "Downloading $output"
+    curl -L --fail --retry 5 --retry-delay 10 -o "$output" "$url"
+  else
+    echo "Found $output, skip download"
+  fi
+}
+
+unzip_if_missing() {
+  local zip_file="$1"
+  local output_dir="$2"
+  if [ ! -d "$output_dir" ]; then
+    echo "Unzipping $zip_file"
+    if command -v unzip >/dev/null 2>&1; then
+      unzip -q "$zip_file" -d dataset
+    else
+      python -m zipfile -e "$zip_file" dataset
+    fi
+  else
+    echo "Found $output_dir, skip unzip"
+  fi
+}
+
+download_if_missing \
+  "https://huggingface.co/datasets/snah/GOPRO_Large/resolve/main/GOPRO_Large.zip" \
+  "dataset/GOPRO_Large.zip"
+
+download_if_missing \
+  "https://huggingface.co/datasets/snah/GOPRO_Large/resolve/main/GOPRO_Large_all.zip" \
+  "dataset/GOPRO_Large_all.zip"
+
+unzip_if_missing "dataset/GOPRO_Large.zip" "dataset/GOPRO_Large"
+unzip_if_missing "dataset/GOPRO_Large_all.zip" "dataset/GOPRO_Large_all"
+
+if [ ! -d dataset/GOPRO_flow/train ] || [ ! -d dataset/GOPRO_flow/test ]; then
+  echo "Generating GOPRO_flow"
+  (
+    cd PrepareCondition
+    python generate_condition.py \
+    --mode all \
+    --model=weights/raft-things.pth \
+    --dir_path=../dataset/GOPRO_flow
+  )
+else
+  echo "Found dataset/GOPRO_flow, skip condition generation"
+fi
+
+find dataset -maxdepth 3 -type d | sort | head -80
 
 python diffusion_train.py \
   --data_path ./dataset/GOPRO_Large \
