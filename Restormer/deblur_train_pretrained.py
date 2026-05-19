@@ -17,8 +17,7 @@ sys.path.append(parent_dir)
 from dataloader import Multi_GoPro_Loader
 from Restormer.model import Restormer
 from Restormer.losses import L1Loss
-from utils.utils import calc_psnr, same_seed, count_parameters, tensor2cv, AverageMeter, judge_and_remove_module_dict
-import torch.nn.functional as F
+from utils.utils import calc_psnr, count_parameters, tensor2cv, AverageMeter, judge_and_remove_module_dict
 import pyiqa
 from tensorboardX import SummaryWriter
 
@@ -182,9 +181,9 @@ class Trainer():
             output = self.model(blur) # [3, C, H, W]
             output = output.clamp(-0.5, 0.5) # [C, H, W]
 
-            save_img_dir_path = os.path.join(dir_path, f'visualization', 'output')
+            save_img_dir_path = os.path.join(dir_path, 'visualization', 'output')
             os.makedirs(save_img_dir_path, exist_ok=True)
-            save_sharp_dir_path = os.path.join(dir_path, f'visualization', 'sharp')
+            save_sharp_dir_path = os.path.join(dir_path, 'visualization', 'sharp')
             os.makedirs(save_sharp_dir_path, exist_ok=True)
 
             save_img_path = os.path.join(save_img_dir_path, f'{self.epoch:05d}_{idx:05d}.png')

@@ -1,7 +1,6 @@
 import argparse
 import os
 import numpy as np
-import matplotlib.pyplot as plt
 import cv2
 import json
 from tqdm import tqdm
@@ -49,7 +48,7 @@ class FindComposite():
                         del composite_img_dict[k]
                         break
 
-            assert len(composite_img_dict) == 0, f"Some composite images do not find origin img !"
+            assert len(composite_img_dict) == 0, "Some composite images do not find origin img !"
             total_info[video] = video_info
 
         json.dump(total_info, tf, indent=4)

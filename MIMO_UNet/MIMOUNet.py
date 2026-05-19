@@ -1,4 +1,4 @@
-import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -34,7 +34,7 @@ class AFF(nn.Module):
         super(AFF, self).__init__()
         self.conv = nn.Sequential(
             BasicConv(in_channel, out_channel, kernel_size=1, stride=1, relu=True),
-            BasicConv(out_channel, out_channel, kernel_size=3, stride=1, relu=False)
+            BasicConv(out_channel, out_channel, kernel_size=3, stride=1, relu=False),
         )
 
     def forward(self, x1, x2, x4):
@@ -46,10 +46,16 @@ class SCM(nn.Module):
     def __init__(self, out_plane):
         super(SCM, self).__init__()
         self.main = nn.Sequential(
-            BasicConv(3, out_plane//4, kernel_size=3, stride=1, relu=True),
-            BasicConv(out_plane // 4, out_plane // 2, kernel_size=1, stride=1, relu=True),
-            BasicConv(out_plane // 2, out_plane // 2, kernel_size=3, stride=1, relu=True),
-            BasicConv(out_plane // 2, out_plane-3, kernel_size=1, stride=1, relu=True)
+            BasicConv(3, out_plane // 4, kernel_size=3, stride=1, relu=True),
+            BasicConv(
+                out_plane // 4, out_plane // 2, kernel_size=1, stride=1, relu=True
+            ),
+            BasicConv(
+                out_plane // 2, out_plane // 2, kernel_size=3, stride=1, relu=True
+            ),
+            BasicConv(
+                out_plane // 2, out_plane - 3, kernel_size=1, stride=1, relu=True
+            ),
         )
 
         self.conv = BasicConv(out_plane, out_plane, kernel_size=1, stride=1, relu=False)
@@ -76,31 +82,69 @@ class MIMOUNet(nn.Module):
 
         base_channel = 32
 
-        self.Encoder = nn.ModuleList([
-            EBlock(base_channel, num_res),
-            EBlock(base_channel*2, num_res),
-            EBlock(base_channel*4, num_res),
-        ])
+        self.Encoder = nn.ModuleList(
+            [
+                EBlock(base_channel, num_res),
+                EBlock(base_channel * 2, num_res),
+                EBlock(base_channel * 4, num_res),
+            ]
+        )
 
-        self.feat_extract = nn.ModuleList([
-            BasicConv(3, base_channel, kernel_size=3, relu=True, stride=1),
-            BasicConv(base_channel, base_channel*2, kernel_size=3, relu=True, stride=2),
-            BasicConv(base_channel*2, base_channel*4, kernel_size=3, relu=True, stride=2),
-            BasicConv(base_channel*4, base_channel*2, kernel_size=4, relu=True, stride=2, transpose=True),
-            BasicConv(base_channel*2, base_channel, kernel_size=4, relu=True, stride=2, transpose=True),
-            BasicConv(base_channel, 3, kernel_size=3, relu=False, stride=1)
-        ])
+        self.feat_extract = nn.ModuleList(
+            [
+                BasicConv(3, base_channel, kernel_size=3, relu=True, stride=1),
+                BasicConv(
+                    base_channel, base_channel * 2, kernel_size=3, relu=True, stride=2
+                ),
+                BasicConv(
+                    base_channel * 2,
+                    base_channel * 4,
+                    kernel_size=3,
+                    relu=True,
+                    stride=2,
+                ),
+                BasicConv(
+                    base_channel * 4,
+                    base_channel * 2,
+                    kernel_size=4,
+                    relu=True,
+                    stride=2,
+                    transpose=True,
+                ),
+                BasicConv(
+                    base_channel * 2,
+                    base_channel,
+                    kernel_size=4,
+                    relu=True,
+                    stride=2,
+                    transpose=True,
+                ),
+                BasicConv(base_channel, 3, kernel_size=3, relu=False, stride=1),
+            ]
+        )
 
-        self.Decoder = nn.ModuleList([
-            DBlock(base_channel * 4, num_res),
-            DBlock(base_channel * 2, num_res),
-            DBlock(base_channel, num_res)
-        ])
+        self.Decoder = nn.ModuleList(
+            [
+                DBlock(base_channel * 4, num_res),
+                DBlock(base_channel * 2, num_res),
+                DBlock(base_channel, num_res),
+            ]
+        )
 
-        self.Convs = nn.ModuleList([
-            BasicConv(base_channel * 4, base_channel * 2, kernel_size=1, relu=True, stride=1),
-            BasicConv(base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1),
-        ])
+        self.Convs = nn.ModuleList(
+            [
+                BasicConv(
+                    base_channel * 4,
+                    base_channel * 2,
+                    kernel_size=1,
+                    relu=True,
+                    stride=1,
+                ),
+                BasicConv(
+                    base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1
+                ),
+            ]
+        )
 
         self.ConvsOut = nn.ModuleList(
             [
@@ -109,10 +153,12 @@ class MIMOUNet(nn.Module):
             ]
         )
 
-        self.AFFs = nn.ModuleList([
-            AFF(base_channel * 7, base_channel*1),
-            AFF(base_channel * 7, base_channel*2)
-        ])
+        self.AFFs = nn.ModuleList(
+            [
+                AFF(base_channel * 7, base_channel * 1),
+                AFF(base_channel * 7, base_channel * 2),
+            ]
+        )
 
         self.FAM1 = FAM(base_channel * 4)
         self.SCM1 = SCM(base_channel * 4)
@@ -149,53 +195,91 @@ class MIMOUNet(nn.Module):
         z = self.Decoder[0](z)
         z_ = self.ConvsOut[0](z)
         z = self.feat_extract[3](z)
-        outputs.append(z_+x_4)
+        outputs.append(z_ + x_4)
 
         z = torch.cat([z, res2], dim=1)
         z = self.Convs[0](z)
         z = self.Decoder[1](z)
         z_ = self.ConvsOut[1](z)
         z = self.feat_extract[4](z)
-        outputs.append(z_+x_2)
+        outputs.append(z_ + x_2)
 
         z = torch.cat([z, res1], dim=1)
         z = self.Convs[1](z)
         z = self.Decoder[2](z)
         z = self.feat_extract[5](z)
-        outputs.append(z+x)
+        outputs.append(z + x)
 
         return outputs
 
 
 class MIMOUNetPlus(nn.Module):
-    def __init__(self, num_res = 20):
+    def __init__(self, num_res=20):
         super(MIMOUNetPlus, self).__init__()
         base_channel = 32
-        self.Encoder = nn.ModuleList([
-            EBlock(base_channel, num_res),
-            EBlock(base_channel*2, num_res),
-            EBlock(base_channel*4, num_res),
-        ])
+        self.Encoder = nn.ModuleList(
+            [
+                EBlock(base_channel, num_res),
+                EBlock(base_channel * 2, num_res),
+                EBlock(base_channel * 4, num_res),
+            ]
+        )
 
-        self.feat_extract = nn.ModuleList([
-            BasicConv(3, base_channel, kernel_size=3, relu=True, stride=1),
-            BasicConv(base_channel, base_channel*2, kernel_size=3, relu=True, stride=2),
-            BasicConv(base_channel*2, base_channel*4, kernel_size=3, relu=True, stride=2),
-            BasicConv(base_channel*4, base_channel*2, kernel_size=4, relu=True, stride=2, transpose=True),
-            BasicConv(base_channel*2, base_channel, kernel_size=4, relu=True, stride=2, transpose=True),
-            BasicConv(base_channel, 3, kernel_size=3, relu=False, stride=1)
-        ])
+        self.feat_extract = nn.ModuleList(
+            [
+                BasicConv(3, base_channel, kernel_size=3, relu=True, stride=1),
+                BasicConv(
+                    base_channel, base_channel * 2, kernel_size=3, relu=True, stride=2
+                ),
+                BasicConv(
+                    base_channel * 2,
+                    base_channel * 4,
+                    kernel_size=3,
+                    relu=True,
+                    stride=2,
+                ),
+                BasicConv(
+                    base_channel * 4,
+                    base_channel * 2,
+                    kernel_size=4,
+                    relu=True,
+                    stride=2,
+                    transpose=True,
+                ),
+                BasicConv(
+                    base_channel * 2,
+                    base_channel,
+                    kernel_size=4,
+                    relu=True,
+                    stride=2,
+                    transpose=True,
+                ),
+                BasicConv(base_channel, 3, kernel_size=3, relu=False, stride=1),
+            ]
+        )
 
-        self.Decoder = nn.ModuleList([
-            DBlock(base_channel * 4, num_res),
-            DBlock(base_channel * 2, num_res),
-            DBlock(base_channel, num_res)
-        ])
+        self.Decoder = nn.ModuleList(
+            [
+                DBlock(base_channel * 4, num_res),
+                DBlock(base_channel * 2, num_res),
+                DBlock(base_channel, num_res),
+            ]
+        )
 
-        self.Convs = nn.ModuleList([
-            BasicConv(base_channel * 4, base_channel * 2, kernel_size=1, relu=True, stride=1),
-            BasicConv(base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1),
-        ])
+        self.Convs = nn.ModuleList(
+            [
+                BasicConv(
+                    base_channel * 4,
+                    base_channel * 2,
+                    kernel_size=1,
+                    relu=True,
+                    stride=1,
+                ),
+                BasicConv(
+                    base_channel * 2, base_channel, kernel_size=1, relu=True, stride=1
+                ),
+            ]
+        )
 
         self.ConvsOut = nn.ModuleList(
             [
@@ -204,10 +288,12 @@ class MIMOUNetPlus(nn.Module):
             ]
         )
 
-        self.AFFs = nn.ModuleList([
-            AFF(base_channel * 7, base_channel*1),
-            AFF(base_channel * 7, base_channel*2)
-        ])
+        self.AFFs = nn.ModuleList(
+            [
+                AFF(base_channel * 7, base_channel * 1),
+                AFF(base_channel * 7, base_channel * 2),
+            ]
+        )
 
         self.FAM1 = FAM(base_channel * 4)
         self.SCM1 = SCM(base_channel * 4)
@@ -250,20 +336,20 @@ class MIMOUNetPlus(nn.Module):
         z = self.Decoder[0](z)
         z_ = self.ConvsOut[0](z)
         z = self.feat_extract[3](z)
-        outputs.append(z_+x_4)
+        outputs.append(z_ + x_4)
 
         z = torch.cat([z, res2], dim=1)
         z = self.Convs[0](z)
         z = self.Decoder[1](z)
         z_ = self.ConvsOut[1](z)
         z = self.feat_extract[4](z)
-        outputs.append(z_+x_2)
+        outputs.append(z_ + x_2)
 
         z = torch.cat([z, res1], dim=1)
         z = self.Convs[1](z)
         z = self.Decoder[2](z)
         z = self.feat_extract[5](z)
-        outputs.append(z+x)
+        outputs.append(z + x)
 
         return outputs
 
@@ -280,14 +366,15 @@ def build_MIMOUnet_net(model_name):
         return MIMOUNetPlus()
     elif model_name == "MIMO-UNet":
         return MIMOUNet()
-    raise ModelError('Wrong Model!\nYou should choose MIMO-UNetPlus or MIMO-UNet.')
+    raise ModelError("Wrong Model!\nYou should choose MIMO-UNetPlus or MIMO-UNet.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Debug
-    #logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    # logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
     net = build_MIMOUnet_net("MIMO-UNet")
     net = net.cuda()
     input = torch.randn(1, 3, 256, 256).cuda()
-    flops, params = profile(net, (input, ))
-    print('FLOPs = ' + str(flops / 1000 ** 3) + 'G')
-    print('Params = ' + str(params / 1000 ** 2) + 'M')
+    flops, params = profile(net, (input,))
+    print("FLOPs = " + str(flops / 1000**3) + "G")
+    print("Params = " + str(params / 1000**2) + "M")

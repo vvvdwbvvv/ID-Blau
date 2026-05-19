@@ -1,20 +1,16 @@
 import argparse
 import logging
-import math
 import os
 import random
-import sys
 from itertools import islice
 
 import cv2
 import pyiqa
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import tqdm
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.utils import save_image
 
 from dataloader import Flow_Loader
 from models.diffusion_model import UNet
@@ -23,7 +19,6 @@ from utils.utils import (
     AverageMeter,
     count_parameters,
     judge_and_remove_module_dict,
-    same_seed,
     tensor2cv,
 )
 
@@ -239,11 +234,11 @@ class Trainer:
             )
             output = output.clamp(-0.5, 0.5)
 
-            save_img_dir_path = os.path.join(dir_path, f"visualization", "output")
+            save_img_dir_path = os.path.join(dir_path, "visualization", "output")
             os.makedirs(save_img_dir_path, exist_ok=True)
-            save_sharp_dir_path = os.path.join(dir_path, f"visualization", "sharp")
+            save_sharp_dir_path = os.path.join(dir_path, "visualization", "sharp")
             os.makedirs(save_sharp_dir_path, exist_ok=True)
-            save_blur_dir_path = os.path.join(dir_path, f"visualization", "blur")
+            save_blur_dir_path = os.path.join(dir_path, "visualization", "blur")
             os.makedirs(save_blur_dir_path, exist_ok=True)
 
             save_img_path = os.path.join(

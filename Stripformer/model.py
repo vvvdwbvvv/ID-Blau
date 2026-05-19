@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
 import math
-import numpy as np
-import torch.nn as nn
 
 class Embeddings(nn.Module):
     def __init__(self):

@@ -1,17 +1,12 @@
 import sys
 sys.path.append('core')
 
-from PIL import Image
 import argparse
 import os
-import time
 import numpy as np
 import torch
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
 
 import datasets
-from utils import flow_viz
 from utils import frame_utils
 
 from raft import RAFT

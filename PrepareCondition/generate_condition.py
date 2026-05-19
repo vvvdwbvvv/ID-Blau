@@ -4,7 +4,6 @@ sys.path.append('core')
 import argparse
 import os
 import cv2
-import glob
 import numpy as np
 import torch
 import json

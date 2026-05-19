@@ -5,12 +5,11 @@ import os
 import sys
 import tqdm
 import argparse
-import matplotlib.pyplot as plt
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(parent_dir)
 from dataloader import Test_Loader
 from Restormer.model import Restormer, RestormerLocal
-from utils.utils import calc_psnr, same_seed, count_parameters, tensor2cv, AverageMeter, judge_and_remove_module_dict
+from utils.utils import same_seed, count_parameters, judge_and_remove_module_dict
 
 
 @torch.no_grad()
