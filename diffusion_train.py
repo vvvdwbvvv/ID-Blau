@@ -297,6 +297,10 @@ if __name__ == "__main__":
     parser.add_argument("--check_point_epoch", default=200, type=int)
     parser.add_argument("--criterion", default="l1", type=str)
     parser.add_argument("--resume", default=None, type=str)
+    parser.add_argument("--num_workers", default=8, type=int)
+    parser.add_argument("--prefetch_factor", default=4, type=int)
+    parser.add_argument("--no_pin_memory", action="store_true")
+    parser.add_argument("--no_persistent_workers", action="store_true")
 
     args = parser.parse_args()
 
@@ -307,6 +311,14 @@ if __name__ == "__main__":
     print(args.__dict__.items())
 
     # Traning loader
+    dataloader_kwargs = {
+        "num_workers": args.num_workers,
+        "pin_memory": not args.no_pin_memory,
+    }
+    if args.num_workers > 0:
+        dataloader_kwargs["persistent_workers"] = not args.no_persistent_workers
+        dataloader_kwargs["prefetch_factor"] = args.prefetch_factor
+
     Train_set = Flow_Loader(
         data_path=args.data_path,
         flow_path=args.flow_data_path,
@@ -318,8 +330,8 @@ if __name__ == "__main__":
         Train_set,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=8,
         drop_last=False,
+        **dataloader_kwargs,
     )
     # Valing loader
     Val_set = Flow_Loader(
@@ -330,7 +342,11 @@ if __name__ == "__main__":
         flow_norm=args.flow_norm,
     )
     dataloader_val = DataLoader(
-        Val_set, batch_size=1, shuffle=True, num_workers=8, drop_last=False
+        Val_set,
+        batch_size=1,
+        shuffle=True,
+        drop_last=False,
+        **dataloader_kwargs,
     )
 
     if args.model == "UNet":
