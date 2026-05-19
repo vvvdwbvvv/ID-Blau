@@ -9,9 +9,9 @@ set -eo pipefail
 module purge
 module load miniconda3
 eval "$(conda shell.bash hook)"
-conda activate IDBlau
+conda activate /work/u7692101/conda/envs/IDBlau
 
-cd "${SLURM_SUBMIT_DIR:-$HOME/ID-Blau}"
+cd "${SLURM_SUBMIT_DIR:-/work/u7692101/ID-Blau}"
 
 mkdir -p logs
 
