@@ -47,9 +47,11 @@ def valid(model, dataloader_val, sample_timesteps, device, valid_iters=None, tit
         elif args.model == "DDPM":
             output = model.sample(condition=condition, device=device, tqdm_visible=True)
         output = output.clamp(-0.5, 0.5)
-        psnr = torch.mean(psnr_func(output.detach(), blur.detach())).item()
-        lpips = torch.mean(lpips_func(output.detach(), blur.detach())).item()
-        niqe = torch.mean(niqe_func(output.detach())).item()
+        output_metric = output.detach() + 0.5
+        blur_metric = blur.detach() + 0.5
+        psnr = torch.mean(psnr_func(output_metric, blur_metric)).item()
+        lpips = torch.mean(lpips_func(output_metric, blur_metric)).item()
+        niqe = torch.mean(niqe_func(output_metric)).item()
         total_val_psnr.update(psnr)
         total_val_lpips.update(lpips)
         total_val_niqe.update(niqe)

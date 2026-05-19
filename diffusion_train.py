@@ -146,8 +146,10 @@ class Trainer:
             device=self.device,
         )
         output = output.clamp(-0.5, 0.5)
-        psnr = torch.mean(self.psnr_func(output.detach(), blur.detach())).item()
-        lpips = torch.mean(self.lpips_func(output.detach(), blur.detach())).item()
+        output_metric = output.detach() + 0.5
+        blur_metric = blur.detach() + 0.5
+        psnr = torch.mean(self.psnr_func(output_metric, blur_metric)).item()
+        lpips = torch.mean(self.lpips_func(output_metric, blur_metric)).item()
         return psnr, lpips
 
     @torch.no_grad()
