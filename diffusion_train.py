@@ -190,12 +190,17 @@ class Trainer:
             "best_panr": self.best_psnr,
             "args": args,
         }
-        torch.save(
-            training_state,
-            os.path.join(
-                self.args.dir_path, "last_{}.pth".format(self.args.model_name)
-            ),
+        should_save_last = (
+            self.args.save_last_epoch > 0
+            and self.epoch % self.args.save_last_epoch == 0
         )
+        if should_save_last or self.epoch == self.args.end_epoch:
+            torch.save(
+                training_state,
+                os.path.join(
+                    self.args.dir_path, "last_{}.pth".format(self.args.model_name)
+                ),
+            )
 
         if (self.epoch % self.args.check_point_epoch) == 0:
             torch.save(
@@ -295,6 +300,7 @@ if __name__ == "__main__":
     parser.add_argument("--validation_epoch", default=50, type=int)
     parser.add_argument("--val_save_epochs", default=50, type=int)
     parser.add_argument("--check_point_epoch", default=200, type=int)
+    parser.add_argument("--save_last_epoch", default=1, type=int)
     parser.add_argument("--criterion", default="l1", type=str)
     parser.add_argument("--resume", default=None, type=str)
     parser.add_argument("--num_workers", default=8, type=int)
