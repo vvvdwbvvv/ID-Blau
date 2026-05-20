@@ -12,18 +12,13 @@
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=110405193@g.nccu.edu.tw
 
-set -euo pipefail
 
-module purge
-module load miniconda3
-module load cuda/12.4
 
-cd "${SLURM_SUBMIT_DIR:-/work/u7692101/ID-Blau}"
+cd /work/u7692101/ID-Blau
+ml load miniconda3
+ml load cuda/12.4
 
-eval "$(conda shell.bash hook)"
 conda activate IDBlau
-
-mkdir -p jobs/train
 
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 
@@ -41,7 +36,7 @@ else
   echo "Found dataset/GOPRO_flow, skip condition generation"
 fi
 
-cd "${SLURM_SUBMIT_DIR:-/work/u7692101/ID-Blau}"
+cd /work/u7692101/ID-Blau
 
 CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py \
   --data_path ./dataset/GOPRO_Large \
