@@ -5,6 +5,7 @@ import random
 import sys
 from itertools import islice
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import pyiqa
@@ -27,7 +28,6 @@ RF_IMAGEGEN_DIR = Path(__file__).resolve().parent / "models" / "RectifiedFlow" /
 if str(RF_IMAGEGEN_DIR) not in sys.path:
     sys.path.insert(0, str(RF_IMAGEGEN_DIR))
 
-from configs.default_lsun_configs import get_default_configs as get_rf_default_configs  # noqa: E402
 from models.ncsnpp import NCSNpp  # noqa: E402
 
 cv2.setNumThreads(0)
@@ -422,48 +422,59 @@ def generate_linear_schedule(T, beta_1, beta_T):
 
 
 def build_rf_config(args):
-    config = get_rf_default_configs()
-    config.device = args.device
-    config.training.sde = "rectified_flow"
-    config.training.continuous = False
-    config.training.reduce_mean = True
-
-    config.sampling.method = "rectified_flow"
-    config.sampling.init_type = "gaussian"
-    config.sampling.init_noise_scale = args.rf_noise_scale
-    config.sampling.use_ode_sampler = args.rf_sampler
-    config.sampling.sample_N = args.sample_timesteps
-
-    config.data.centered = True
-    config.data.image_size = args.rf_image_size
-    config.data.input_channels = 9
-    config.data.output_channels = 3
-    config.data.num_channels = 3
-
-    config.model.name = "ncsnpp"
-    config.model.scale_by_sigma = False
-    config.model.ema_rate = 0.999
-    config.model.normalization = "GroupNorm"
-    config.model.nonlinearity = "swish"
-    config.model.nf = args.base_channels
-    config.model.ch_mult = tuple(args.channel_mults)
-    config.model.num_res_blocks = args.num_res_blocks
-    config.model.dropout = args.dropout
-    config.model.attn_resolutions = tuple(args.attn_resolutions)
-    config.model.resamp_with_conv = True
-    config.model.conditional = True
-    config.model.fir = True
-    config.model.fir_kernel = [1, 3, 3, 1]
-    config.model.skip_rescale = True
-    config.model.resblock_type = args.rf_resblock_type
-    config.model.progressive = args.rf_progressive
-    config.model.progressive_input = args.rf_progressive_input
-    config.model.progressive_combine = "sum"
-    config.model.attention_type = "ddpm"
-    config.model.init_scale = 0.0
-    config.model.fourier_scale = 16
-    config.model.conv_size = 3
-    return config
+    return SimpleNamespace(
+        device=args.device,
+        training=SimpleNamespace(
+            sde="rectified_flow",
+            continuous=False,
+            reduce_mean=True,
+        ),
+        sampling=SimpleNamespace(
+            method="rectified_flow",
+            init_type="gaussian",
+            init_noise_scale=args.rf_noise_scale,
+            use_ode_sampler=args.rf_sampler,
+            sample_N=args.sample_timesteps,
+        ),
+        data=SimpleNamespace(
+            centered=True,
+            image_size=args.rf_image_size,
+            input_channels=9,
+            output_channels=3,
+            num_channels=3,
+        ),
+        model=SimpleNamespace(
+            name="ncsnpp",
+            sigma_max=378,
+            sigma_min=0.01,
+            num_scales=2000,
+            beta_min=0.1,
+            beta_max=20.0,
+            scale_by_sigma=False,
+            ema_rate=0.999,
+            normalization="GroupNorm",
+            nonlinearity="swish",
+            nf=args.base_channels,
+            ch_mult=tuple(args.channel_mults),
+            num_res_blocks=args.num_res_blocks,
+            dropout=args.dropout,
+            attn_resolutions=tuple(args.attn_resolutions),
+            resamp_with_conv=True,
+            conditional=True,
+            fir=True,
+            fir_kernel=[1, 3, 3, 1],
+            skip_rescale=True,
+            resblock_type=args.rf_resblock_type,
+            progressive=args.rf_progressive,
+            progressive_input=args.rf_progressive_input,
+            progressive_combine="sum",
+            attention_type="ddpm",
+            init_scale=0.0,
+            embedding_type="fourier",
+            fourier_scale=16,
+            conv_size=3,
+        ),
+    )
 
 
 if __name__ == "__main__":
