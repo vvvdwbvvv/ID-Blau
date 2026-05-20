@@ -61,7 +61,7 @@ def get_default_configs():
   model.num_scales = 2000
   model.beta_min = 0.1
   model.beta_max = 20.
-  model.dropout = 0.
+  model.dropout = 0.15
   model.embedding_type = 'fourier'
 
   # optimization
