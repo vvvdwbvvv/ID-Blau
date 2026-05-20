@@ -422,6 +422,7 @@ def generate_linear_schedule(T, beta_1, beta_T):
 
 
 def build_rf_config(args):
+    image_size = args.rf_image_size if args.rf_image_size is not None else args.crop_size
     return SimpleNamespace(
         device=args.device,
         training=SimpleNamespace(
@@ -438,7 +439,7 @@ def build_rf_config(args):
         ),
         data=SimpleNamespace(
             centered=True,
-            image_size=args.rf_image_size,
+            image_size=image_size,
             input_channels=9,
             output_channels=3,
             num_channels=3,
@@ -512,7 +513,7 @@ if __name__ == "__main__":
     parser.add_argument("--check_point_epoch", default=200, type=int)
     parser.add_argument("--save_last_epoch", default=1, type=int)
     parser.add_argument("--criterion", default="l2", choices=["l1", "l2"], type=str)
-    parser.add_argument("--rf_image_size", default=256, type=int)
+    parser.add_argument("--rf_image_size", default=None, type=int)
     parser.add_argument("--attn_resolutions", default=(16,), type=int, nargs="+")
     parser.add_argument(
         "--rf_resblock_type", default="biggan", choices=["biggan", "ddpm"], type=str
@@ -580,7 +581,7 @@ if __name__ == "__main__":
         data_path=args.data_path,
         flow_path=args.flow_data_path,
         mode="test",
-        crop_size=None,
+        crop_size=args.crop_size,
         flow_norm=args.flow_norm,
     )
     dataloader_val = DataLoader(
