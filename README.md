@@ -21,6 +21,20 @@ conda create -n IDBlau python=3.9
 conda activate IDBlau
 conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia
 pip install opencv-python tqdm tensorboardX pyiqa thop
+
+
+module purge
+module load miniconda3
+eval "$(conda shell.bash hook)"
+
+conda create -y -n IDBlau python=3.12
+conda activate IDBlau
+
+python -m pip install -U pip
+
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+pip install opencv-python tqdm tensorboardX pyiqa thop
 ```
 
 ## ID-Blau
@@ -83,7 +97,12 @@ The generated blurry dataset will be located in the "./dataset/GOPRO_Large_Reblu
 Run the following command.
 
 ```
-CUDA_VISIBLE_DEVICES=0,1,2,3 python diffusion_train.py
+CUDA_VISIBLE_DEVICES=0 python diffusion_train.py \
+  --batch_size 32 \
+  --crop_size 128 \
+  --end_epoch 5000 \
+  --init_lr 1e-4 \
+  --optimizer adam
 ```
 
 ## Deblurring Model
