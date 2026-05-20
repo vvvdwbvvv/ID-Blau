@@ -525,7 +525,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--rf_progressive_input",
-        default="input_skip",
+        default="none",
         choices=["none", "input_skip", "residual"],
         type=str,
     )
