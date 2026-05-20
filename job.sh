@@ -12,15 +12,18 @@
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=110405193@g.nccu.edu.tw
 
+set -euo pipefail
 
-ml load miniconda3
-ml load cuda/12.4
+module purge
+module load miniconda3
+module load cuda/12.4
 
-cd /work/u7692101/ID-Blau/
+cd "${SLURM_SUBMIT_DIR:-/work/u7692101/ID-Blau}"
 
-conda activate ID-Blau
+eval "$(conda shell.bash hook)"
+conda activate IDBlau
 
-mkdir -p /jobs/train
+mkdir -p jobs/train
 
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 
@@ -30,26 +33,26 @@ if [ ! -d dataset/GOPRO_flow/train ] || [ ! -d dataset/GOPRO_flow/test ]; then
   (
     cd PrepareCondition
     python generate_condition.py \
-    --mode all \
-    --model=weights/raft-things.pth \
-    --dir_path=../dataset/GOPRO_flow \
+      --mode all \
+      --model=weights/raft-things.pth \
+      --dir_path=../dataset/GOPRO_flow
   )
 else
   echo "Found dataset/GOPRO_flow, skip condition generation"
 fi
 
-cd /work/u7692101/ID-Blau/
+cd "${SLURM_SUBMIT_DIR:-/work/u7692101/ID-Blau}"
 
-CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py
-    --data_path ./dataset/GOPRO_Large \
-    --flow_data_path ./dataset/GOPRO_flow \
-    --dir_path ./experiments/ID_Blau_RF \
-    --model_name ID_Blau_RF \
-    --batch_size 8 \
-    --crop_size 128 \
-    --end_epoch 5000 \
-    --optimizer adamw \
-    --sample_timesteps 1000 \
-    --scheduler cosine \
-    --init_lr 2e-4 \
-    --min_lr 1e-5
+CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py \
+  --data_path ./dataset/GOPRO_Large \
+  --flow_data_path ./dataset/GOPRO_flow \
+  --dir_path ./experiments/ID_Blau_RF \
+  --model_name ID_Blau_RF \
+  --batch_size 8 \
+  --crop_size 128 \
+  --end_epoch 5000 \
+  --optimizer adamw \
+  --sample_timesteps 1000 \
+  --scheduler cosine \
+  --init_lr 2e-4 \
+  --min_lr 1e-5
