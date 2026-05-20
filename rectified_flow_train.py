@@ -190,6 +190,7 @@ class Trainer:
         self.epoch = 0
         self.global_step = 0
         self.sample_timesteps = self.args.sample_timesteps
+        self.val_sample_timesteps = self.args.val_sample_timesteps
         self.device = self.args.device
         self.psnr_func = pyiqa.create_metric("psnr", device=self.device)
         self.lpips_func = pyiqa.create_metric("lpips", device=self.device)
@@ -213,6 +214,9 @@ class Trainer:
         print(
             f"Scheduler:{self.scheduler.__class__.__name__ if self.scheduler else None}"
         )
+        print("Sample_Timesteps:", self.sample_timesteps)
+        print("Val_Sample_Timesteps:", self.val_sample_timesteps)
+        print("Valid_Iters:", self.args.valid_iters)
         print("start train")
 
         for epoch in range(self.args.start_epoch, self.args.end_epoch + 1):
@@ -222,7 +226,7 @@ class Trainer:
             if (
                 epoch % self.args.validation_epoch
             ) == 0 or epoch == self.args.end_epoch:
-                self.valid()
+                self.valid(valid_iters=self.args.valid_iters)
 
             if (
                 self.args.val_save_epochs > 0
@@ -291,7 +295,7 @@ class Trainer:
         condition = torch.cat([sharp, flow], dim=1)
         output = self.model.sample(
             condition=condition,
-            sample_timesteps=self.sample_timesteps,
+            sample_timesteps=self.val_sample_timesteps,
             device=self.device,
             method=self.args.rf_sampler,
         )
@@ -396,7 +400,7 @@ class Trainer:
             condition = torch.cat([sharp, flow], dim=1)
             output = self.model.sample(
                 condition=condition,
-                sample_timesteps=self.sample_timesteps,
+                sample_timesteps=self.val_sample_timesteps,
                 device=self.device,
                 method=self.args.rf_sampler,
             )
@@ -513,6 +517,8 @@ if __name__ == "__main__":
     parser.add_argument("--opt_beta1", default=0.9, type=float)
     parser.add_argument("--scheduler", default=None, type=str)
     parser.add_argument("--sample_timesteps", default=1000, type=int)
+    parser.add_argument("--val_sample_timesteps", default=50, type=int)
+    parser.add_argument("--valid_iters", default=10, type=int)
     parser.add_argument("--base_channels", default=128, type=int)
     parser.add_argument("--time_dim", default=256, type=int)
     parser.add_argument(
@@ -655,7 +661,8 @@ if __name__ == "__main__":
     ):
         print("load_last_pretrained")
         training_state = torch.load(
-            os.path.join(args.dir_path, "last_{}.pth".format(args.model_name))
+            os.path.join(args.dir_path, "last_{}.pth".format(args.model_name)),
+            weights_only=False,
         )
         args.start_epoch = training_state["epoch"] + 1
         args.resume_global_step = training_state.get("global_step", 0)
@@ -679,7 +686,7 @@ if __name__ == "__main__":
             scheduler.load_state_dict(new_scheduler)
     elif args.resume:
         print("load_resume_pretrained")
-        model_load = torch.load(args.resume)
+        model_load = torch.load(args.resume, weights_only=False)
         if "model_state" in model_load.keys():
             rectified_flow_model.load_state_dict(model_load["model_state"])
         else:
