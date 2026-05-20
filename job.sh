@@ -9,8 +9,8 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --output=jobs/train/job-%j.out
 #SBATCH --error=jobs/train/job-%j.err
-#SBATCH --main-type=BEGIN, END, FAIL
-#SBATCH --main-user=110405193@g.nccu.edu.tw
+#SBATCH --mail-type=BEGIN, END, FAIL
+#SBATCH --mail-user=110405193@g.nccu.edu.tw
 
 
 ml load miniconda3
