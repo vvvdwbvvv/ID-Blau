@@ -11,6 +11,7 @@ import cv2
 import pyiqa
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import tqdm
 from torch.utils.data import DataLoader
@@ -78,6 +79,9 @@ class ConditionalRectifiedFlow(nn.Module):
         self.noise_scale = noise_scale
         self.t_eps = t_eps
         self.t_scale = t_scale
+        model_config = getattr(model, "config", None)
+        ch_mult = getattr(getattr(model_config, "model", None), "ch_mult", None)
+        self.size_divisor = 2 ** (len(ch_mult) - 1) if ch_mult else 1
 
         if criterion == "l1":
             self.criterion = CharbonnierLoss()
@@ -127,7 +131,14 @@ class ConditionalRectifiedFlow(nn.Module):
             sample_steps = self.sample_steps
 
         b, _, h, w = condition.shape
+        pad_h = (self.size_divisor - h % self.size_divisor) % self.size_divisor
+        pad_w = (self.size_divisor - w % self.size_divisor) % self.size_divisor
+        if pad_h or pad_w:
+            condition = F.pad(condition, (0, pad_w, 0, pad_h), mode="replicate")
+
         x = torch.randn((b, self.img_channels, h, w), device=device) * self.noise_scale
+        if pad_h or pad_w:
+            x = F.pad(x, (0, pad_w, 0, pad_h), mode="replicate")
 
         timesteps = torch.linspace(self.t_eps, 1.0, sample_steps + 1, device=device)
         iterator = (
@@ -155,7 +166,7 @@ class ConditionalRectifiedFlow(nn.Module):
             else:
                 raise ValueError("method must be 'euler' or 'heun'")
 
-        return x.detach()
+        return x[..., :h, :w].detach()
 
 
 class Trainer:
@@ -484,6 +495,7 @@ if __name__ == "__main__":
     parser.add_argument("--start_epoch", default=1, type=int)
     parser.add_argument("--batch_size", default=64, type=int)
     parser.add_argument("--crop_size", default=256, type=int)
+    parser.add_argument("--val_crop_size", default=None, type=int)
     parser.add_argument("--init_lr", default=2e-4, type=float)
     parser.add_argument("--min_lr", default=1e-5, type=float)
     parser.add_argument("--beta_1", default=1e-6, type=float)
@@ -581,7 +593,7 @@ if __name__ == "__main__":
         data_path=args.data_path,
         flow_path=args.flow_data_path,
         mode="test",
-        crop_size=args.crop_size,
+        crop_size=args.val_crop_size,
         flow_norm=args.flow_norm,
     )
     dataloader_val = DataLoader(
