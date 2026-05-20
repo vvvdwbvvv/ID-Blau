@@ -2,7 +2,9 @@ import argparse
 import logging
 import os
 import random
+import sys
 from itertools import islice
+from pathlib import Path
 
 import cv2
 import pyiqa
@@ -14,8 +16,6 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from dataloader import Flow_Loader
-from models.diffusion_model import UNet
-from models.losses import CharbonnierLoss
 from utils.utils import (
     AverageMeter,
     count_parameters,
@@ -23,19 +23,32 @@ from utils.utils import (
     tensor2cv,
 )
 
+RF_IMAGEGEN_DIR = Path(__file__).resolve().parent / "models" / "RectifiedFlow" / "ImageGeneration"
+if str(RF_IMAGEGEN_DIR) not in sys.path:
+    sys.path.insert(0, str(RF_IMAGEGEN_DIR))
+
+from configs.default_lsun_configs import get_default_configs as get_rf_default_configs  # noqa: E402
+from models.ncsnpp import NCSNpp  # noqa: E402
+
 cv2.setNumThreads(0)
 torch.backends.cudnn.benchmark = True
 
 
+class CharbonnierLoss(nn.Module):
+    def __init__(self, eps=1e-3):
+        super().__init__()
+        self.eps = eps
+
+    def forward(self, pred, target):
+        return torch.mean(torch.sqrt((pred - target) ** 2 + self.eps**2))
+
+
 class ConditionalRectifiedFlow(nn.Module):
     """
-    Conditional rectified-flow wrapper for ID-Blau.
+    Conditional rectified-flow wrapper for ID-Blau using the vendored
+    RectifiedFlow/ImageGeneration model family.
 
-    It keeps the existing ID-Blau call surface:
-      loss = model(x1=blur, condition=torch.cat([sharp, flow], dim=1), x0=sharp)
-      output = model.sample(condition=condition, x0=sharp, ...)
-
-    The training objective follows the Rectified Flow implementation under
+    The training objective and Gaussian start follow the implementation under
     models/RectifiedFlow/ImageGeneration:
       x_t = t * x_1 + (1 - t) * x_0
       target = x_1 - x_0
@@ -49,7 +62,7 @@ class ConditionalRectifiedFlow(nn.Module):
         device="cuda",
         sample_steps=50,
         use_dataparallel=True,
-        init_type="sharp",
+        init_type="gaussian",
         noise_scale=1.0,
         t_eps=1e-3,
         t_scale=999.0,
@@ -73,21 +86,17 @@ class ConditionalRectifiedFlow(nn.Module):
         else:
             raise ValueError("loss criterion must be l1 or l2")
 
-    def get_x0(self, x1, x0=None):
-        if self.init_type == "sharp":
-            if x0 is None:
-                raise ValueError("init_type='sharp' requires x0=sharp")
-            return x0
+    def get_x0(self, x1):
         if self.init_type == "gaussian":
             return torch.randn_like(x1) * self.noise_scale
-        raise ValueError("init_type must be 'sharp' or 'gaussian'")
+        raise ValueError("init_type must be 'gaussian' for the vendored RF model")
 
     @staticmethod
     def expand_time(t, x):
         return t.view(-1, *([1] * (x.ndim - 1)))
 
-    def compute_loss(self, x1, condition, x0=None):
-        source = self.get_x0(x1, x0=x0)
+    def compute_loss(self, x1, condition):
+        source = self.get_x0(x1)
         t = (
             torch.rand(x1.shape[0], device=x1.device) * (1.0 - self.t_eps)
             + self.t_eps
@@ -99,14 +108,13 @@ class ConditionalRectifiedFlow(nn.Module):
         pred_velocity = self.model(model_input, t * self.t_scale)
         return self.criterion(pred_velocity, target_velocity)
 
-    def forward(self, x1, condition, x0=None):
-        return self.compute_loss(x1=x1, condition=condition, x0=x0)
+    def forward(self, x1, condition):
+        return self.compute_loss(x1=x1, condition=condition)
 
     @torch.no_grad()
     def sample(
         self,
         condition,
-        x0=None,
         device="cuda",
         sample_steps=None,
         sample_timesteps=None,
@@ -119,13 +127,7 @@ class ConditionalRectifiedFlow(nn.Module):
             sample_steps = self.sample_steps
 
         b, _, h, w = condition.shape
-        if x0 is None:
-            x = (
-                torch.randn((b, self.img_channels, h, w), device=device)
-                * self.noise_scale
-            )
-        else:
-            x = x0.to(device)
+        x = torch.randn((b, self.img_channels, h, w), device=device) * self.noise_scale
 
         timesteps = torch.linspace(self.t_eps, 1.0, sample_steps + 1, device=device)
         iterator = (
@@ -175,12 +177,22 @@ class Trainer:
         self.args = args
         self.writer = writer
         self.epoch = 0
+        self.global_step = 0
         self.sample_timesteps = self.args.sample_timesteps
         self.device = self.args.device
         self.psnr_func = pyiqa.create_metric("psnr", device=self.device)
         self.lpips_func = pyiqa.create_metric("lpips", device=self.device)
         self.best_psnr = self.args.best_psnr if hasattr(self.args, "best_psnr") else 0
-        self.grad_clip = 1
+        self.grad_clip = self.args.grad_clip
+
+    def _apply_warmup_lr(self):
+        if self.args.warmup_steps <= 0 or self.global_step >= self.args.warmup_steps:
+            return
+        warmup_lr = self.args.init_lr * min(
+            float(self.global_step + 1) / self.args.warmup_steps, 1.0
+        )
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = warmup_lr
 
     def train(self):
         print("Start_Epoch:", self.args.start_epoch)
@@ -229,12 +241,14 @@ class Trainer:
             )
             flow = sample["flow"].to(self.device)
             condition = torch.cat([sharp, flow], dim=1)
-            loss = self.model(x1=blur, condition=condition, x0=sharp)
+            loss = self.model(x1=blur, condition=condition)
             loss.backward()
 
+            self._apply_warmup_lr()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
 
             self.optimizer.step()
+            self.global_step += 1
             total_train_loss.update(loss.detach().item())
 
             # if idx % 10 == 0:
@@ -264,10 +278,8 @@ class Trainer:
     def _valid(self, sharp, blur, flow):
         self.model.eval()
         condition = torch.cat([sharp, flow], dim=1)
-        sample_x0 = sharp if self.args.rf_init_type == "sharp" else None
         output = self.model.sample(
             condition=condition,
-            x0=sample_x0,
             sample_timesteps=self.sample_timesteps,
             device=self.device,
             method=self.args.rf_sampler,
@@ -321,6 +333,7 @@ class Trainer:
         """save model parameters"""
         training_state = {
             "epoch": self.epoch,
+            "global_step": self.global_step,
             "model_state": self.model.state_dict(),
             "optimizer_state": self.optimizer.state_dict(),
             "scheduler_state": self.scheduler.state_dict() if self.scheduler else None,
@@ -370,10 +383,8 @@ class Trainer:
             )
             flow = sample["flow"].unsqueeze(0).to(self.device)
             condition = torch.cat([sharp, flow], dim=1)
-            sample_x0 = sharp if self.args.rf_init_type == "sharp" else None
             output = self.model.sample(
                 condition=condition,
-                x0=sample_x0,
                 sample_timesteps=self.sample_timesteps,
                 device=self.device,
                 method=self.args.rf_sampler,
@@ -410,32 +421,79 @@ def generate_linear_schedule(T, beta_1, beta_T):
     return torch.linspace(beta_1, beta_T, T).double()
 
 
+def build_rf_config(args):
+    config = get_rf_default_configs()
+    config.device = args.device
+    config.training.sde = "rectified_flow"
+    config.training.continuous = False
+    config.training.reduce_mean = True
+
+    config.sampling.method = "rectified_flow"
+    config.sampling.init_type = "gaussian"
+    config.sampling.init_noise_scale = args.rf_noise_scale
+    config.sampling.use_ode_sampler = args.rf_sampler
+    config.sampling.sample_N = args.sample_timesteps
+
+    config.data.centered = True
+    config.data.image_size = args.rf_image_size
+    config.data.input_channels = 9
+    config.data.output_channels = 3
+    config.data.num_channels = 3
+
+    config.model.name = "ncsnpp"
+    config.model.scale_by_sigma = False
+    config.model.ema_rate = 0.999
+    config.model.normalization = "GroupNorm"
+    config.model.nonlinearity = "swish"
+    config.model.nf = args.base_channels
+    config.model.ch_mult = tuple(args.channel_mults)
+    config.model.num_res_blocks = args.num_res_blocks
+    config.model.dropout = args.dropout
+    config.model.attn_resolutions = tuple(args.attn_resolutions)
+    config.model.resamp_with_conv = True
+    config.model.conditional = True
+    config.model.fir = True
+    config.model.fir_kernel = [1, 3, 3, 1]
+    config.model.skip_rescale = True
+    config.model.resblock_type = args.rf_resblock_type
+    config.model.progressive = args.rf_progressive
+    config.model.progressive_input = args.rf_progressive_input
+    config.model.progressive_combine = "sum"
+    config.model.attention_type = "ddpm"
+    config.model.init_scale = 0.0
+    config.model.fourier_scale = 16
+    config.model.conv_size = 3
+    return config
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--end_epoch", default=5000, type=int)
     parser.add_argument("--start_epoch", default=1, type=int)
-    parser.add_argument("--batch_size", default=32, type=int)
-    parser.add_argument("--crop_size", default=128, type=int)
-    parser.add_argument("--init_lr", default=1e-4, type=float)
+    parser.add_argument("--batch_size", default=64, type=int)
+    parser.add_argument("--crop_size", default=256, type=int)
+    parser.add_argument("--init_lr", default=2e-4, type=float)
     parser.add_argument("--min_lr", default=1e-5, type=float)
     parser.add_argument("--beta_1", default=1e-6, type=float)
     parser.add_argument("--beta_T", default=1e-2, type=float)
     parser.add_argument("--dropout", default=0.0, type=float)
-    parser.add_argument("--weight_decay", default=0, type=float)
+    parser.add_argument("--weight_decay", default=0.0, type=float)
     parser.add_argument("--num_timesteps", default=2000, type=int)
     parser.add_argument("--dir_path", default="./experiments/ID_Blau", type=str)
     parser.add_argument("--data_path", default="./dataset/GOPRO_Large", type=str)
     parser.add_argument("--flow_data_path", default="./dataset/GOPRO_flow", type=str)
     parser.add_argument("--flow_norm", default=True, type=bool)
     parser.add_argument("--model_name", default="ID_Blau_FM", type=str)
-    parser.add_argument("--model", default="UNet", choices=["UNet"], type=str)
+    parser.add_argument("--model", default="ncsnpp", choices=["ncsnpp"], type=str)
     parser.add_argument("--optimizer", default="adam", type=str)
     parser.add_argument("--opt_beta1", default=0.9, type=float)
     parser.add_argument("--scheduler", default=None, type=str)
-    parser.add_argument("--sample_timesteps", default=20, type=int)
-    parser.add_argument("--base_channels", default=64, type=int)
+    parser.add_argument("--sample_timesteps", default=1000, type=int)
+    parser.add_argument("--base_channels", default=128, type=int)
     parser.add_argument("--time_dim", default=256, type=int)
-    parser.add_argument("--channel_mults", default=(1, 2, 3), type=int, nargs="+")
+    parser.add_argument(
+        "--channel_mults", default=(1, 1, 2, 2, 2, 2, 2), type=int, nargs="+"
+    )
     parser.add_argument("--num_res_blocks", default=2, type=int)
     parser.add_argument("--seed", default=2023, type=int)
     parser.add_argument("--validation_epoch", default=50, type=int)
@@ -443,12 +501,22 @@ if __name__ == "__main__":
     parser.add_argument("--check_point_epoch", default=200, type=int)
     parser.add_argument("--save_last_epoch", default=1, type=int)
     parser.add_argument("--criterion", default="l2", choices=["l1", "l2"], type=str)
+    parser.add_argument("--rf_image_size", default=256, type=int)
+    parser.add_argument("--attn_resolutions", default=(16,), type=int, nargs="+")
     parser.add_argument(
-        "--rf_init_type",
-        default="sharp",
-        choices=["sharp", "gaussian"],
+        "--rf_resblock_type", default="biggan", choices=["biggan", "ddpm"], type=str
+    )
+    parser.add_argument(
+        "--rf_progressive",
+        default="output_skip",
+        choices=["none", "output_skip", "residual"],
         type=str,
-        help="RF source distribution. 'sharp' preserves ID-Blau sharp-to-blur training; 'gaussian' matches standard RF.",
+    )
+    parser.add_argument(
+        "--rf_progressive_input",
+        default="input_skip",
+        choices=["none", "input_skip", "residual"],
+        type=str,
     )
     parser.add_argument("--rf_noise_scale", default=1.0, type=float)
     parser.add_argument("--rf_t_eps", default=1e-3, type=float)
@@ -456,9 +524,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--rf_sampler", default="euler", choices=["euler", "heun"], type=str
     )
+    parser.add_argument("--warmup_steps", default=5000, type=int)
+    parser.add_argument("--grad_clip", default=1.0, type=float)
     parser.add_argument("--resume", default=None, type=str)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--prefetch_factor", default=4, type=int)
+    parser.add_argument("--opt_eps", default=1e-8, type=float)
     parser.add_argument("--no_pin_memory", action="store_true")
     parser.add_argument("--no_persistent_workers", action="store_true")
 
@@ -509,25 +580,19 @@ if __name__ == "__main__":
         **dataloader_kwargs,
     )
 
-    if args.model == "UNet":
-        net = UNet(
-            img_channels=9,
-            base_channels=args.base_channels,
-            channel_mults=args.channel_mults,
-            time_dim=args.time_dim,
-            num_res_blocks=args.num_res_blocks,
-            dropout=args.dropout,
-        ).to(device)
-    else:
+    if args.model != "ncsnpp":
         raise ValueError("model error")
 
-    diffusionModel = ConditionalRectifiedFlow(
+    rf_config = build_rf_config(args)
+    net = NCSNpp(rf_config).to(device)
+
+    rectified_flow_model = ConditionalRectifiedFlow(
         net,
         img_channels=3,
         criterion=args.criterion,
         device=device,
         sample_steps=args.sample_timesteps,
-        init_type=args.rf_init_type,
+        init_type="gaussian",
         noise_scale=args.rf_noise_scale,
         t_eps=args.rf_t_eps,
         t_scale=args.rf_t_scale,
@@ -535,10 +600,20 @@ if __name__ == "__main__":
 
     if args.optimizer == "adam":
         optimizer = optim.Adam(
-            net.parameters(), lr=args.init_lr, betas=(args.opt_beta1, 0.999)
+            net.parameters(),
+            lr=args.init_lr,
+            betas=(args.opt_beta1, 0.999),
+            eps=args.opt_eps,
+            weight_decay=args.weight_decay,
         )
     elif args.optimizer == "adamw":
-        optimizer = optim.AdamW(net.parameters(), lr=args.init_lr, weight_decay=1e-4)
+        optimizer = optim.AdamW(
+            net.parameters(),
+            lr=args.init_lr,
+            betas=(args.opt_beta1, 0.999),
+            eps=args.opt_eps,
+            weight_decay=args.weight_decay,
+        )
     else:
         raise ValueError(f"optimizer not supported {args.optimizer}")
 
@@ -559,6 +634,7 @@ if __name__ == "__main__":
             os.path.join(args.dir_path, "last_{}.pth".format(args.model_name))
         )
         args.start_epoch = training_state["epoch"] + 1
+        args.resume_global_step = training_state.get("global_step", 0)
         saved_args = training_state.get("args")
         if hasattr(saved_args, "best_psnr"):
             args.best_psnr = saved_args.best_psnr
@@ -567,9 +643,9 @@ if __name__ == "__main__":
         training_state["model_state"] = judge_and_remove_module_dict(
             training_state["model_state"]
         )
-        new_weight = diffusionModel.state_dict()
+        new_weight = rectified_flow_model.state_dict()
         new_weight.update(training_state["model_state"])
-        diffusionModel.load_state_dict(new_weight)
+        rectified_flow_model.load_state_dict(new_weight)
         new_optimizer = optimizer.state_dict()
         new_optimizer.update(training_state["optimizer_state"])
         optimizer.load_state_dict(new_optimizer)
@@ -581,9 +657,9 @@ if __name__ == "__main__":
         print("load_resume_pretrained")
         model_load = torch.load(args.resume)
         if "model_state" in model_load.keys():
-            diffusionModel.load_state_dict(model_load["model_state"])
+            rectified_flow_model.load_state_dict(model_load["model_state"])
         else:
-            diffusionModel.load_state_dict(model_load)
+            rectified_flow_model.load_state_dict(model_load)
         os.makedirs(args.dir_path, exist_ok=True)
     else:
         os.makedirs(args.dir_path, exist_ok=True)
@@ -596,8 +672,8 @@ if __name__ == "__main__":
     )
 
     logging.info(f"args: {args}")
-    logging.info(f"model: {diffusionModel}")
-    logging.info(f"model parameters: {count_parameters(diffusionModel)}")
+    logging.info(f"model: {rectified_flow_model}")
+    logging.info(f"model parameters: {count_parameters(rectified_flow_model)}")
     logging.info(f"Optimizer:{optimizer.__class__.__name__}")
     logging.info(f"Scheduler:{scheduler.__class__.__name__ if scheduler else None}")
 
@@ -607,10 +683,11 @@ if __name__ == "__main__":
     trainer = Trainer(
         dataloader_train,
         dataloader_val,
-        diffusionModel,
+        rectified_flow_model,
         optimizer,
         scheduler,
         args,
         writer,
     )
+    trainer.global_step = getattr(args, "resume_global_step", 0)
     trainer.train()
