@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import cv2
 import pyiqa
+from scipy import integrate
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -140,16 +141,42 @@ class ConditionalRectifiedFlow(nn.Module):
         if pad_h or pad_w:
             x = F.pad(x, (0, pad_w, 0, pad_h), mode="replicate")
 
-        timesteps = torch.linspace(self.t_eps, 1.0, sample_steps + 1, device=device)
+        if method == "rk45":
+            def ode_func(num_t, flat_x):
+                x_t = (
+                    torch.from_numpy(flat_x.reshape(x.shape))
+                    .to(device)
+                    .type(torch.float32)
+                )
+                t_batch = torch.ones(b, device=device) * num_t
+                model_input = torch.cat([x_t, condition], dim=1)
+                drift = self.model(model_input, t_batch * self.t_scale)
+                return drift.detach().cpu().numpy().reshape(-1)
+
+            solution = integrate.solve_ivp(
+                ode_func,
+                (self.t_eps, 1.0),
+                x.detach().cpu().numpy().reshape(-1),
+                rtol=1e-5,
+                atol=1e-5,
+                method="RK45",
+            )
+            x = (
+                torch.from_numpy(solution.y[:, -1].reshape(x.shape))
+                .to(device)
+                .type(torch.float32)
+            )
+            return x[..., :h, :w].detach()
+
+        dt = 1.0 / sample_steps
         iterator = (
             tqdm.tqdm(range(sample_steps), desc="rectified-flow sampling")
             if tqdm_visible
             else range(sample_steps)
         )
         for i in iterator:
-            t = timesteps[i]
-            t_next = timesteps[i + 1]
-            dt = t_next - t
+            t = i / sample_steps * (1.0 - self.t_eps) + self.t_eps
+            t_next = min((i + 1) / sample_steps * (1.0 - self.t_eps) + self.t_eps, 1.0)
             t_batch = torch.full((b,), t, device=device)
             model_input = torch.cat([x, condition], dim=1)
             velocity = self.model(model_input, t_batch * self.t_scale)
@@ -164,7 +191,7 @@ class ConditionalRectifiedFlow(nn.Module):
                 )
                 x = x + 0.5 * dt * (velocity + velocity_next)
             else:
-                raise ValueError("method must be 'euler' or 'heun'")
+                raise ValueError("method must be 'euler', 'heun', or 'rk45'")
 
         return x[..., :h, :w].detach()
 
@@ -552,7 +579,7 @@ if __name__ == "__main__":
     parser.add_argument("--rf_t_eps", default=1e-3, type=float)
     parser.add_argument("--rf_t_scale", default=999.0, type=float)
     parser.add_argument(
-        "--rf_sampler", default="euler", choices=["euler", "heun"], type=str
+        "--rf_sampler", default="euler", choices=["euler", "heun", "rk45"], type=str
     )
     parser.add_argument("--warmup_steps", default=5000, type=int)
     parser.add_argument("--grad_clip", default=1.0, type=float)
