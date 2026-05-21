@@ -1,7 +1,5 @@
 """Abstract SDE classes, Reverse SDE, and VE/VP SDEs."""
-import abc
 import torch
-import numpy as np
 from models import utils as mutils
 
 
@@ -38,7 +36,7 @@ class RectifiedFlow():
     @torch.no_grad()
     def ode(self, init_input, model, reverse=False):
       ### run ODE solver for reflow. init_input can be \pi_0 or \pi_1
-      from models.utils import from_flattened_numpy, to_flattened_numpy, get_score_fn
+      from models.utils import from_flattened_numpy, to_flattened_numpy
       from scipy import integrate
       rtol=1e-5
       atol=1e-5

@@ -20,7 +20,8 @@ Jia-Hao Wu, Fu-Jen Tsai, Yan-Tsung Peng, Chung-Chi Tsai, Chia-Wen Lin, Yen-Yu Li
 conda create -n IDBlau python=3.9
 conda activate IDBlau
 conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia
-pip install opencv-python tqdm tensorboardX pyiqa thop
+conda install -y pip
+python -m pip install opencv-python tqdm tensorboardX pyiqa thop
 
 
 module purge
@@ -30,11 +31,12 @@ eval "$(conda shell.bash hook)"
 conda create -y -n IDBlau python=3.12
 conda activate IDBlau
 
+conda install -y pip
 python -m pip install -U pip
 
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
-pip install opencv-python tqdm tensorboardX pyiqa thop
+python -m pip install opencv-python tqdm tensorboardX pyiqa thop
 ```
 
 ## ID-Blau

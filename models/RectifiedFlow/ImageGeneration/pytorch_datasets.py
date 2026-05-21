@@ -1,11 +1,8 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
-from skimage import io, transform
+from torch.utils.data import Dataset
+from skimage import io
 import os
 import numpy as np
-import lmdb
-import cv2
-import random
 
 
 class celeba_hq_dataset(Dataset):

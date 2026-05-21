@@ -9,12 +9,12 @@ from types import SimpleNamespace
 
 import cv2
 import pyiqa
-from scipy import integrate
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import tqdm
+from scipy import integrate
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -26,7 +26,9 @@ from utils.utils import (
     tensor2cv,
 )
 
-RF_IMAGEGEN_DIR = Path(__file__).resolve().parent / "models" / "RectifiedFlow" / "ImageGeneration"
+RF_IMAGEGEN_DIR = (
+    Path(__file__).resolve().parent / "models" / "RectifiedFlow" / "ImageGeneration"
+)
 if str(RF_IMAGEGEN_DIR) not in sys.path:
     sys.path.insert(0, str(RF_IMAGEGEN_DIR))
 
@@ -102,10 +104,7 @@ class ConditionalRectifiedFlow(nn.Module):
 
     def compute_loss(self, x1, condition):
         source = self.get_x0(x1)
-        t = (
-            torch.rand(x1.shape[0], device=x1.device) * (1.0 - self.t_eps)
-            + self.t_eps
-        )
+        t = torch.rand(x1.shape[0], device=x1.device) * (1.0 - self.t_eps) + self.t_eps
         t_img = self.expand_time(t, x1)
         xt = t_img * x1 + (1.0 - t_img) * source
         target_velocity = x1 - source
@@ -142,6 +141,7 @@ class ConditionalRectifiedFlow(nn.Module):
             x = F.pad(x, (0, pad_w, 0, pad_h), mode="replicate")
 
         if method == "rk45":
+
             def ode_func(num_t, flat_x):
                 x_t = (
                     torch.from_numpy(flat_x.reshape(x.shape))
@@ -464,7 +464,9 @@ def generate_linear_schedule(T, beta_1, beta_T):
 
 
 def build_rf_config(args):
-    image_size = args.rf_image_size if args.rf_image_size is not None else args.crop_size
+    image_size = (
+        args.rf_image_size if args.rf_image_size is not None else args.crop_size
+    )
     return SimpleNamespace(
         device=args.device,
         training=SimpleNamespace(

@@ -22,7 +22,6 @@ import numpy as np
 from scipy import integrate
 from models import utils as mutils
 
-import torchvision
 
 def get_div_fn(fn):
   """Create the divergence function of `fn` using the Hutchinson-Skilling trace estimator."""

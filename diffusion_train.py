@@ -1,21 +1,17 @@
 import argparse
 import torch
-import torch.nn as nn
 import os
 import logging
-import math
-from torchvision.utils import save_image
 from itertools import islice
 import tqdm
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import random
 import cv2
-import sys
 from dataloader import Flow_Loader
 from models.diffusion_model import UNet
 from models.diffusion_network import DDIM
-from utils.utils import same_seed, count_parameters, tensor2cv, AverageMeter, judge_and_remove_module_dict
+from utils.utils import count_parameters, tensor2cv, AverageMeter, judge_and_remove_module_dict
 import pyiqa
 from torch.utils.tensorboard import SummaryWriter
 
@@ -165,11 +161,11 @@ class Trainer():
             output = self.model.sample(condition=condition, sample_timesteps=self.sample_timesteps, device=self.device)
             output = output.clamp(-0.5, 0.5)
 
-            save_img_dir_path = os.path.join(dir_path, f'visualization', 'output')
+            save_img_dir_path = os.path.join(dir_path, 'visualization', 'output')
             os.makedirs(save_img_dir_path, exist_ok=True)
-            save_sharp_dir_path = os.path.join(dir_path, f'visualization', 'sharp')
+            save_sharp_dir_path = os.path.join(dir_path, 'visualization', 'sharp')
             os.makedirs(save_sharp_dir_path, exist_ok=True)
-            save_blur_dir_path = os.path.join(dir_path, f'visualization', 'blur')
+            save_blur_dir_path = os.path.join(dir_path, 'visualization', 'blur')
             os.makedirs(save_blur_dir_path, exist_ok=True)
 
             save_img_path = os.path.join(save_img_dir_path, f'{self.epoch:05d}_{idx:05d}.png')
