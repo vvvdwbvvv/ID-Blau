@@ -37,7 +37,6 @@ CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py \
   --resume ./weights/epoch_1000_ID_Blau_RF \
   --batch_size 4 \
   --crop_size 256 \
-  --val_crop_size 256 \
   --rf_image_size 128 \
   --end_epoch 1000 \
   --optimizer adamw \
