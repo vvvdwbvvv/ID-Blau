@@ -22,38 +22,29 @@ conda activate IDBlau
 
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 
-RESUME_PATH="${RESUME_PATH:-./weights/epoch_1000_ID_Blau_RF}"
-EXPERIMENT_DIR="${EXPERIMENT_DIR:-./experiments/ID_Blau_RF_ft256}"
-MODEL_NAME="${MODEL_NAME:-ID_Blau_RF_ft256}"
-BATCH_SIZE="${BATCH_SIZE:-4}"
-END_EPOCH="${END_EPOCH:-1000}"
-INIT_LR="${INIT_LR:-5e-5}"
-MIN_LR="${MIN_LR:-1e-6}"
-
-if [ ! -f "$RESUME_PATH" ]; then
-  echo "Missing checkpoint: $RESUME_PATH"
-  echo "Set RESUME_PATH=/path/to/checkpoint when submitting this script."
+if [ ! -f ./weights/epoch_1000_ID_Blau_RF ]; then
+  echo "Missing checkpoint: ./weights/epoch_1000_ID_Blau_RF"
   exit 1
 fi
 
-mkdir -p jobs/finetune_256 "$EXPERIMENT_DIR"
+mkdir -p jobs/finetune_256 ./experiments/ID_Blau_RF_ft256
 
 CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py \
   --data_path ./dataset/GOPRO_Large \
   --flow_data_path ./dataset/GOPRO_flow \
-  --dir_path "$EXPERIMENT_DIR" \
-  --model_name "$MODEL_NAME" \
-  --resume "$RESUME_PATH" \
-  --batch_size "$BATCH_SIZE" \
+  --dir_path ./experiments/ID_Blau_RF_ft256 \
+  --model_name ID_Blau_RF_ft256 \
+  --resume ./weights/epoch_1000_ID_Blau_RF \
+  --batch_size 4 \
   --crop_size 256 \
   --val_crop_size 256 \
-  --end_epoch "$END_EPOCH" \
+  --end_epoch 1000 \
   --optimizer adamw \
   --sample_timesteps 1000 \
   --val_sample_timesteps 50 \
   --scheduler cosine \
-  --init_lr "$INIT_LR" \
-  --min_lr "$MIN_LR" \
+  --init_lr 5e-5 \
+  --min_lr 1e-6 \
   --validation_epoch 25 \
   --val_save_epochs 25 \
   --check_point_epoch 100 \
