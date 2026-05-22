@@ -22,11 +22,6 @@ conda activate IDBlau
 
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 
-if [ ! -f ./weights/epoch_1000_ID_Blau_RF ]; then
-  echo "Missing checkpoint: ./weights/epoch_1000_ID_Blau_RF"
-  exit 1
-fi
-
 mkdir -p jobs/finetune_256 ./experiments/ID_Blau_RF_ft256
 
 CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py \
