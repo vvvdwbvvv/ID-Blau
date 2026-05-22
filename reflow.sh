@@ -20,7 +20,7 @@ conda activate IDBlau
 
 python -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 
-CUDA_VISIBLE_DEVICES=0 python diffusion_inference.py \
+CUDA_VISIBLE_DEVICES=0 python rectified_flow_inference.py \
   --model_path ./weights/epoch_1000_ID_Blau_RF \
   --dir_path ./dataset/GOPRO_Large_Reblur \
   --strategy M10 O TURN
