@@ -37,7 +37,6 @@ CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py \
   --optimizer adamw \
   --sample_timesteps 1000 \
   --val_sample_timesteps 50 \
-  --scheduler cosine \
   --init_lr 5e-5 \
   --min_lr 1e-6 \
   --validation_epoch 25 \
