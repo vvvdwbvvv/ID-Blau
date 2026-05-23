@@ -710,9 +710,11 @@ if __name__ == "__main__":
         new_optimizer.update(training_state["optimizer_state"])
         optimizer.load_state_dict(new_optimizer)
         if scheduler:
-            new_scheduler = scheduler.state_dict()
-            new_scheduler.update(training_state["scheduler_state"])
-            scheduler.load_state_dict(new_scheduler)
+            saved_scheduler_state = training_state.get("scheduler_state")
+            if saved_scheduler_state:
+                new_scheduler = scheduler.state_dict()
+                new_scheduler.update(saved_scheduler_state)
+                scheduler.load_state_dict(new_scheduler)
     elif args.resume:
         print("load_resume_pretrained")
         model_load = torch.load(args.resume, weights_only=False)
