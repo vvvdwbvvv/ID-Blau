@@ -70,6 +70,8 @@ class ConditionalRectifiedFlow(nn.Module):
         noise_scale=1.0,
         t_eps=1e-3,
         t_scale=999.0,
+        pad_multiple=None,
+        pad_mode="reflect",
     ):
         super().__init__()
         if use_dataparallel:
@@ -82,6 +84,8 @@ class ConditionalRectifiedFlow(nn.Module):
         self.noise_scale = noise_scale
         self.t_eps = t_eps
         self.t_scale = t_scale
+        self.pad_multiple = pad_multiple
+        self.pad_mode = pad_mode
         model_config = getattr(model, "config", None)
         ch_mult = getattr(getattr(model_config, "model", None), "ch_mult", None)
         self.size_divisor = 2 ** (len(ch_mult) - 1) if ch_mult else 1
@@ -131,14 +135,18 @@ class ConditionalRectifiedFlow(nn.Module):
             sample_steps = self.sample_steps
 
         b, _, h, w = condition.shape
-        pad_h = (self.size_divisor - h % self.size_divisor) % self.size_divisor
-        pad_w = (self.size_divisor - w % self.size_divisor) % self.size_divisor
+        pad_multiple = self.sample_pad_multiple or self.size_divisor
+        pad_h = (pad_multiple - h % pad_multiple) % pad_multiple
+        pad_w = (pad_multiple - w % pad_multiple) % pad_multiple
         if pad_h or pad_w:
-            condition = F.pad(condition, (0, pad_w, 0, pad_h), mode="replicate")
+            condition = F.pad(
+                condition, (0, pad_w, 0, pad_h), mode=self.sample_pad_mode
+            )
 
-        x = torch.randn((b, self.img_channels, h, w), device=device) * self.noise_scale
-        if pad_h or pad_w:
-            x = F.pad(x, (0, pad_w, 0, pad_h), mode="replicate")
+        x = (
+            torch.randn((b, self.img_channels, h + pad_h, w + pad_w), device=device)
+            * self.noise_scale
+        )
 
         if method == "rk45":
 
@@ -585,6 +593,13 @@ if __name__ == "__main__":
     )
     parser.add_argument("--warmup_steps", default=5000, type=int)
     parser.add_argument("--grad_clip", default=1.0, type=float)
+    parser.add_argument("--pad_multiple", default=None, type=int)
+    parser.add_argument(
+        "--pad_mode",
+        default="reflect",
+        choices=["reflect", "replicate"],
+        type=str,
+    )
     parser.add_argument("--resume", default=None, type=str)
     parser.add_argument("--num_workers", default=8, type=int)
     parser.add_argument("--prefetch_factor", default=4, type=int)
@@ -593,6 +608,8 @@ if __name__ == "__main__":
     parser.add_argument("--no_persistent_workers", action="store_true")
 
     args = parser.parse_args()
+    if args.pad_multiple is None:
+        args.pad_multiple = args.crop_size
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     args.device = device
@@ -655,6 +672,8 @@ if __name__ == "__main__":
         noise_scale=args.rf_noise_scale,
         t_eps=args.rf_t_eps,
         t_scale=args.rf_t_scale,
+        pad_multiple=args.pad_multiple,
+        pad_mode=args.pad_mode,
     )
 
     if args.optimizer == "adam":
