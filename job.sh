@@ -41,13 +41,17 @@ cd /work/u7692101/ID-Blau
 CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py \
   --data_path ./dataset/GOPRO_Large \
   --flow_data_path ./dataset/GOPRO_flow \
-  --dir_path ./experiments/ID_Blau_RF \
-  --model_name ID_Blau_RF \
-  --batch_size 8 \
-  --crop_size 128 \
-  --end_epoch 5000 \
+  --dir_path ./experiments/ID_Blau_RF_256_pretrain \
+  --model_name ID_Blau_RF_256_pretrain \
+  --batch_size 4 \
+  --crop_size 256 \
+  --end_epoch 1000 \
   --optimizer adamw \
   --sample_timesteps 1000 \
+  --val_sample_timesteps 100 \
   --scheduler cosine \
-  --init_lr 2e-4 \
-  --min_lr 1e-5
+  --init_lr 1e-4 \
+  --min_lr 1e-6 \
+  --pad_multiple 128 \
+  --pad_mode reflect 
+

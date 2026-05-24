@@ -24,12 +24,13 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 
 mkdir -p jobs/finetune_256 ./experiments/ID_Blau_RF_ft256
 
+
 CUDA_VISIBLE_DEVICES=0 python rectified_flow_train.py \
   --data_path ./dataset/GOPRO_Large \
   --flow_data_path ./dataset/GOPRO_flow \
   --dir_path ./experiments/ID_Blau_RF_ft256 \
   --model_name ID_Blau_RF_ft256 \
-  --resume ./weights/epoch_1000_ID_Blau_RF \
+  --resume ./weights/best_ID_Blau_RF.pth \
   --batch_size 4 \
   --crop_size 256 \
   --rf_image_size 128 \
