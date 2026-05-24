@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import pyiqa
 import torch
+import torch.nn.functional as F
 import tqdm
 from torch.utils.data import DataLoader
 from torchvision.utils import save_image
@@ -39,6 +40,15 @@ def get_arg(saved_args, name, default=None):
 def set_arg_default(saved_args, name, value):
     if not hasattr(saved_args, name):
         setattr(saved_args, name, value)
+
+
+def pad_to_multiple(input_tensor, multiple, mode="reflect"):
+    _, _, h, w = input_tensor.shape
+    pad_h = (multiple - h % multiple) % multiple
+    pad_w = (multiple - w % multiple) % multiple
+    if pad_h or pad_w:
+        input_tensor = F.pad(input_tensor, (0, pad_w, 0, pad_h), mode=mode)
+    return input_tensor, h, w
 
 
 def build_model_from_checkpoint(checkpoint, device, sample_timesteps=None, sampler=None):
@@ -89,14 +99,18 @@ def sample_rectified_flow(
     sample_timesteps=None,
     tqdm_visible=False,
     method="euler",
+    pad_multiple=128,
+    pad_mode="reflect",
 ):
-    return model.sample(
+    condition, h, w = pad_to_multiple(condition, pad_multiple, mode=pad_mode)
+    output = model.sample(
         condition=condition,
         sample_timesteps=sample_timesteps,
         device=device,
         tqdm_visible=tqdm_visible,
         method=method,
     )
+    return output[:, :, :h, :w]
 
 
 @torch.no_grad()
@@ -127,6 +141,8 @@ def valid(model, dataloader_val, sample_timesteps, device, sampler, valid_iters=
             device=device,
             tqdm_visible=False,
             method=sampler,
+            pad_multiple=args.pad_multiple,
+            pad_mode=args.pad_mode,
         ).clamp(-0.5, 0.5)
 
         output_metric = output.detach() + 0.5
@@ -191,6 +207,8 @@ def val_save_image(model, dir_path, dataset, sample_timesteps, device, sampler, 
             device=device,
             tqdm_visible=True,
             method=sampler,
+            pad_multiple=args.pad_multiple,
+            pad_mode=args.pad_mode,
         ).clamp(-0.5, 0.5)
 
         save_dir_path = os.path.join(dir_path, "output")
@@ -275,6 +293,8 @@ def generate_dataset(
                 sample_timesteps=sample_timesteps,
                 device=device,
                 method=sampler,
+                pad_multiple=args.pad_multiple,
+                pad_mode=args.pad_mode,
             ).clamp(-0.5, 0.5)
 
             cv2.imwrite(
@@ -333,6 +353,10 @@ if __name__ == "__main__":
     parser.add_argument("--save_npy", default=False, type=bool)
     parser.add_argument("--seed", default=2023, type=int)
     parser.add_argument("--rf_sampler", default=None, choices=["euler", "heun", "rk45"], type=str)
+    parser.add_argument("--pad_multiple", default=128, type=int)
+    parser.add_argument(
+        "--pad_mode", default="reflect", type=str, choices=["reflect", "replicate"]
+    )
 
     args = parser.parse_args()
     if args.dir_path is None:
