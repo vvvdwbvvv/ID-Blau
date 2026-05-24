@@ -135,12 +135,12 @@ class ConditionalRectifiedFlow(nn.Module):
             sample_steps = self.sample_steps
 
         b, _, h, w = condition.shape
-        pad_multiple = self.sample_pad_multiple or self.size_divisor
+        pad_multiple = self.pad_multiple or self.size_divisor
         pad_h = (pad_multiple - h % pad_multiple) % pad_multiple
         pad_w = (pad_multiple - w % pad_multiple) % pad_multiple
         if pad_h or pad_w:
             condition = F.pad(
-                condition, (0, pad_w, 0, pad_h), mode=self.sample_pad_mode
+                condition, (0, pad_w, 0, pad_h), mode=self.pad_mode
             )
 
         x = (
