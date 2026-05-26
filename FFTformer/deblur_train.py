@@ -157,8 +157,10 @@ class Trainer:
         # Compute loss at each stage
         loss = self.criterion_l1(output, sharp) + self.criterion_fft(output, sharp)
 
-        psnr = torch.mean(self.psnr_func(output.detach(), sharp.detach())).item()
-        lpips = torch.mean(self.lpips_func(output.detach(), sharp.detach())).item()
+        pred_metric = (output.detach() + 0.5).clamp(0, 1)
+        sharp_metric = (sharp.detach() + 0.5).clamp(0, 1)
+        psnr = torch.mean(self.psnr_func(pred_metric, sharp_metric)).item()
+        lpips = torch.mean(self.lpips_func(pred_metric, sharp_metric)).item()
         return psnr, lpips, loss.item()
 
     @torch.no_grad()

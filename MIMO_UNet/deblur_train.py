@@ -207,8 +207,10 @@ class Trainer:
         loss_fft = f1 + f2 + f3
 
         loss = loss_content + 0.1 * loss_fft
-        psnr = torch.mean(self.psnr_func(outputs[2].detach(), sharp.detach())).item()
-        lpips = torch.mean(self.lpips_func(outputs[2].detach(), sharp.detach())).item()
+        pred_metric = (outputs[2].detach() + 0.5).clamp(0, 1)
+        sharp_metric = (sharp.detach() + 0.5).clamp(0, 1)
+        psnr = torch.mean(self.psnr_func(pred_metric, sharp_metric)).item()
+        lpips = torch.mean(self.lpips_func(pred_metric, sharp_metric)).item()
         return psnr, lpips, loss.item()
 
     @torch.no_grad()
