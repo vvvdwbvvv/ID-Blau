@@ -28,7 +28,7 @@ CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
   --master_port 29611 \
   FFTformer/deblur_train_pretrained.py \
-  --batch_size 4 \
+  --batch_size 2 \
   --only_use_generate_data \
   --generate_path ./dataset/GOPRO_Large_Reblur
 
@@ -36,5 +36,5 @@ CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
   --master_port 29611 \
   FFTformer/deblur_train.py \
-  --batch_size 4 \
+  --batch_size 2 \
   --resume ./experiments/FFTformer_pretrained/epoch_500_FFTformer_pretrained.pth
