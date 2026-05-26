@@ -12,6 +12,8 @@
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=110405193@g.nccu.edu.tw
 
+set -euo pipefail
+
 cd /work/u7692101/ID-Blau
 ml load miniconda3
 ml load cuda/12.4
@@ -22,13 +24,15 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 
 mkdir -p jobs/fftformer
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch \
+CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
+  --master_port 29611 \
   FFTformer/deblur_train_pretrained.py \
   --only_use_generate_data \
   --generate_path ./dataset/GOPRO_Large_Reblur
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch \
+CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
+  --master_port 29611 \
   FFTformer/deblur_train.py \
   --resume ./experiments/FFTformer_pretrained/epoch_500_FFTformer_pretrained.pth

@@ -24,18 +24,21 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 
 mkdir -p jobs/stripformer
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch \
+CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
+  --master_port 29629 \
   Stripformer/deblur_train_pretrained.py \
   --only_use_generate_data \
   --generate_path ./dataset/GOPRO_Large_Reblur
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch \
+CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
+  --master_port 29629 \
   Stripformer/deblur_train_first.py \
   --resume ./experiments/Stripformer_pretrained/epoch_500_Stripformer_pretrained.pth
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch \
+CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
+  --master_port 29629 \
   Stripformer/deblur_train_second.py \
   --resume ./experiments/Stripformer_first_stage/final_Stripformer_first_stage.pth

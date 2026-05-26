@@ -24,13 +24,15 @@ python -c "import torch; print(torch.__version__); print(torch.cuda.is_available
 
 mkdir -p jobs/mimounet
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch \
+CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
+  --master_port 29617 \
   MIMO_UNet/deblur_train_pretrained.py \
   --only_use_generate_data \
   --generate_path ./dataset/GOPRO_Large_Reblur
 
-CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch \
+CUDA_VISIBLE_DEVICES=0 torchrun \
   --nproc_per_node 1 \
+  --master_port 29617 \
   MIMO_UNet/deblur_train.py \
   --resume ./experiments/MIMO_UNetPlus_pretrained/epoch_500_MIMO_UNetPlus_pretrained.pth
