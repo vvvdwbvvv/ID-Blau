@@ -297,7 +297,13 @@ if __name__ == "__main__":
         action="store_true",
         help="only use generated data to train model.",
     )
-    parser.add_argument("--local_rank", default=os.getenv("LOCAL_RANK", -1), type=int)
+    parser.add_argument(
+        "--local_rank",
+        "--local-rank",
+        dest="local_rank",
+        default=os.getenv("LOCAL_RANK", -1),
+        type=int,
+    )
 
     args = parser.parse_args()
 
