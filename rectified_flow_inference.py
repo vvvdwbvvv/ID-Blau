@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import json
 import logging
 import os
 import random
@@ -226,6 +227,55 @@ def val_save_image(model, dir_path, dataset, sample_timesteps, device, sampler, 
         cv2.imwrite(os.path.join(flow_dir_path, f"{idx:05d}.png"), flo[:, :, [2, 1, 0]])
 
 
+def detect_last_completed_idx(dir_path, generate_num):
+    """
+    Auto-detect the last completed index by checking the output directory structure.
+    Looks for completed folders with all generated files.
+    """
+    blur_path = os.path.join(dir_path, "blur")
+    
+    if not os.path.exists(blur_path):
+        return -1
+    
+    # Get all subdirectories in blur folder (format: 00000, 00001, etc.)
+    completed_idxs = []
+    for folder_name in os.listdir(blur_path):
+        folder_path = os.path.join(blur_path, folder_name)
+        if not os.path.isdir(folder_path):
+            continue
+        
+        try:
+            idx = int(folder_name)
+            # Check if all generated images exist
+            generated_files = [f for f in os.listdir(folder_path) if f.endswith('.png')]
+            if len(generated_files) == generate_num:
+                completed_idxs.append(idx)
+        except (ValueError, OSError):
+            continue
+    
+    if completed_idxs:
+        return max(completed_idxs)
+    return -1
+
+
+def load_checkpoint(checkpoint_path):
+    """Load checkpoint file with progress information"""
+    if os.path.exists(checkpoint_path):
+        try:
+            with open(checkpoint_path, 'r') as f:
+                return json.load(f)
+        except:
+            pass
+    return {"processed_indices": [], "last_idx": -1}
+
+
+def save_checkpoint(checkpoint_path, data):
+    """Save checkpoint file with progress information"""
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+    with open(checkpoint_path, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
 @torch.no_grad()
 def generate_dataset(
     model,
@@ -237,6 +287,7 @@ def generate_dataset(
     sampler,
     generate_num=5,
     save_npy=False,
+    resume_idx=None,
 ):
     sharp_path = os.path.join(dir_path, "sharp")
     blur_path = os.path.join(dir_path, "blur")
@@ -245,6 +296,10 @@ def generate_dataset(
     os.makedirs(sharp_path, exist_ok=True)
     os.makedirs(blur_path, exist_ok=True)
     os.makedirs(condition_path, exist_ok=True)
+
+    # Setup checkpoint
+    checkpoint_path = os.path.join(dir_path, ".generation_checkpoint.json")
+    checkpoint = load_checkpoint(checkpoint_path)
 
     if "TURN" not in strategy_setting:
         strategy = strategy_setting[:]
@@ -255,56 +310,98 @@ def generate_dataset(
             strategy_list.remove("FIXED")
 
     model.eval()
-    tq = tqdm.tqdm(range(len(dataset)))
+    
+    # Determine starting index
+    if resume_idx is not None:
+        start_idx = resume_idx
+        print(f"📍 Resuming from user-specified index: {resume_idx}")
+    else:
+        # Auto-detect last completed index
+        last_completed = detect_last_completed_idx(dir_path, generate_num)
+        start_idx = last_completed + 1
+        if last_completed >= 0:
+            print(f"✅ Auto-detected last completed index: {last_completed}")
+            print(f"📍 Resuming from index: {start_idx}")
+        else:
+            print(f"📍 Starting from beginning (index 0)")
+    
+    total_count = len(dataset)
+    remaining = total_count - start_idx
+    print(f"📊 Progress: {start_idx}/{total_count} items completed | {remaining} remaining")
+    print("-" * 70)
+    
+    tq = tqdm.tqdm(range(start_idx, len(dataset)), initial=start_idx, total=len(dataset))
     tq.set_description("Generate images")
+    
     for idx in tq:
-        sample = dataset[idx]
-        sharp_idx_path = os.path.join(sharp_path, f"{idx:05d}")
-        os.makedirs(sharp_idx_path, exist_ok=True)
-        save_image(
-            sample["sharp"].squeeze(0).cpu() + 0.5,
-            os.path.join(sharp_idx_path, "sharp.png"),
-        )
-
-        blur_idx_path = os.path.join(blur_path, f"{idx:05d}")
-        os.makedirs(blur_idx_path, exist_ok=True)
-
-        if save_npy:
-            condition_idx_path = os.path.join(condition_path, f"{idx:05d}")
-            os.makedirs(condition_idx_path, exist_ok=True)
-
-        change_base = random.randint(0, 100) if "FIXED" in strategy_setting else 0
-        for index in range(generate_num):
-            sharp = sample["sharp"].unsqueeze(0).to(device)
-            flow = sample["flow"].clone().unsqueeze(0).to(device)
-            choice_num = index if "FIXED" in strategy_setting else None
-            if "TURN" in strategy_setting:
-                strategy = [strategy_list[(idx + index) % len(strategy_list)]]
-            new_flow = select_condition_strategy(
-                flow,
-                strategy=strategy,
-                choice_num=choice_num,
-                change_base=change_base,
+        try:
+            sample = dataset[idx]
+            sharp_idx_path = os.path.join(sharp_path, f"{idx:05d}")
+            os.makedirs(sharp_idx_path, exist_ok=True)
+            save_image(
+                sample["sharp"].squeeze(0).cpu() + 0.5,
+                os.path.join(sharp_idx_path, "sharp.png"),
             )
-            condition = torch.cat([sharp, new_flow], dim=1)
-            output = sample_rectified_flow(
-                model,
-                condition=condition,
-                sample_timesteps=sample_timesteps,
-                device=device,
-                method=sampler,
-                pad_multiple=args.pad_multiple,
-                pad_mode=args.pad_mode,
-            ).clamp(-0.5, 0.5)
 
-            cv2.imwrite(
-                os.path.join(blur_idx_path, f"{index:05d}.png"),
-                tensor2cv(output + 0.5),
-            )
+            blur_idx_path = os.path.join(blur_path, f"{idx:05d}")
+            os.makedirs(blur_idx_path, exist_ok=True)
 
             if save_npy:
-                condition_np = new_flow.squeeze(0).cpu().numpy()
-                np.save(os.path.join(condition_idx_path, f"{index:05d}.npy"), condition_np)
+                condition_idx_path = os.path.join(condition_path, f"{idx:05d}")
+                os.makedirs(condition_idx_path, exist_ok=True)
+
+            change_base = random.randint(0, 100) if "FIXED" in strategy_setting else 0
+            for index in range(generate_num):
+                sharp = sample["sharp"].unsqueeze(0).to(device)
+                flow = sample["flow"].clone().unsqueeze(0).to(device)
+                choice_num = index if "FIXED" in strategy_setting else None
+                if "TURN" in strategy_setting:
+                    strategy = [strategy_list[(idx + index) % len(strategy_list)]]
+                new_flow = select_condition_strategy(
+                    flow,
+                    strategy=strategy,
+                    choice_num=choice_num,
+                    change_base=change_base,
+                )
+                condition = torch.cat([sharp, new_flow], dim=1)
+                output = sample_rectified_flow(
+                    model,
+                    condition=condition,
+                    sample_timesteps=sample_timesteps,
+                    device=device,
+                    method=sampler,
+                    pad_multiple=args.pad_multiple,
+                    pad_mode=args.pad_mode,
+                ).clamp(-0.5, 0.5)
+
+                cv2.imwrite(
+                    os.path.join(blur_idx_path, f"{index:05d}.png"),
+                    tensor2cv(output + 0.5),
+                )
+
+                if save_npy:
+                    condition_np = new_flow.squeeze(0).cpu().numpy()
+                    np.save(os.path.join(condition_idx_path, f"{index:05d}.npy"), condition_np)
+
+            # Update checkpoint after successful completion of idx
+            if idx not in checkpoint["processed_indices"]:
+                checkpoint["processed_indices"].append(idx)
+            checkpoint["last_idx"] = idx
+            save_checkpoint(checkpoint_path, checkpoint)
+            
+            # Update progress bar description
+            completed = idx + 1 - start_idx
+            tq.set_postfix({"Completed": f"{completed}/{remaining}"})
+            
+        except Exception as e:
+            print(f"\n❌ Error processing index {idx}: {str(e)}")
+            print(f"Checkpoint saved. You can resume from index {idx + 1}")
+            save_checkpoint(checkpoint_path, checkpoint)
+            raise
+
+    print("-" * 70)
+    print(f"✨ Generation complete! All {total_count} items processed.")
+    print(f"📁 Output saved to: {dir_path}")
 
 
 if __name__ == "__main__":
@@ -356,6 +453,12 @@ if __name__ == "__main__":
     parser.add_argument("--pad_multiple", default=128, type=int)
     parser.add_argument(
         "--pad_mode", default="reflect", type=str, choices=["reflect", "replicate"]
+    )
+    parser.add_argument(
+        "--resume_idx",
+        default=None,
+        type=int,
+        help="Resume from specific index (optional; auto-detection used if not specified)"
     )
 
     args = parser.parse_args()
@@ -415,6 +518,7 @@ if __name__ == "__main__":
             save_npy=args.save_npy,
             device=device,
             sampler=sampler,
+            resume_idx=args.resume_idx,
         )
     elif args.type in pyiqa.list_models():
         logging.basicConfig(
