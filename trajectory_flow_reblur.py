@@ -100,6 +100,34 @@ def save_rgb(path, tensor):
     cv2.imwrite(str(path), cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
 
 
+def pad_spatial_to_multiple(tensor, multiple, mode="reflect"):
+    if multiple is None:
+        _, _, h, w = tensor.shape
+        return tensor, h, w
+    if multiple <= 0:
+        raise ValueError("pad multiple must be positive")
+
+    _, _, h, w = tensor.shape
+    pad_h = (multiple - h % multiple) % multiple
+    pad_w = (multiple - w % multiple) % multiple
+    if pad_h or pad_w:
+        reflect_pad_too_large = (
+            mode == "reflect"
+            and ((pad_h and pad_h >= h) or (pad_w and pad_w >= w))
+        )
+        if reflect_pad_too_large:
+            raise ValueError(
+                "reflect padding requires pad size smaller than the input size; "
+                "use --sample_pad_mode replicate or a smaller --sample_pad_multiple"
+            )
+        tensor = F.pad(tensor, (0, pad_w, 0, pad_h), mode=mode)
+    return tensor, h, w
+
+
+def crop_spatial(tensor, height, width):
+    return tensor[..., :height, :width]
+
+
 def rotate_vectors_90(flow_hw3, k):
     # Rotate the x/y direction channels consistently with np.rot90(image, k).
     if k == 0:
@@ -761,13 +789,39 @@ class TrajectoryFlowReblur(nn.Module):
         return self._solve_trajectory(sharp, sample_steps=sample_steps, sampler=sampler)
 
     @torch.no_grad()
-    def sample_trajectory(self, sharp, sample_steps=50, sampler="heun"):
-        return self._solve_trajectory(sharp, sample_steps=sample_steps, sampler=sampler)
+    def sample_trajectory(
+        self,
+        sharp,
+        sample_steps=50,
+        sampler="heun",
+        pad_multiple=None,
+        pad_mode="reflect",
+    ):
+        sharp, h, w = pad_spatial_to_multiple(sharp, pad_multiple, mode=pad_mode)
+        trajectory = self._solve_trajectory(
+            sharp,
+            sample_steps=sample_steps,
+            sampler=sampler,
+        )
+        return crop_spatial(trajectory, h, w)
 
     @torch.no_grad()
-    def sample_reblur(self, sharp, sample_steps=50, sampler="heun"):
-        trajectory = self.sample_trajectory(sharp, sample_steps=sample_steps, sampler=sampler)
-        return self.render_from_trajectory(sharp, trajectory), trajectory
+    def sample_reblur(
+        self,
+        sharp,
+        sample_steps=50,
+        sampler="heun",
+        pad_multiple=None,
+        pad_mode="reflect",
+    ):
+        sharp, h, w = pad_spatial_to_multiple(sharp, pad_multiple, mode=pad_mode)
+        trajectory = self._solve_trajectory(
+            sharp,
+            sample_steps=sample_steps,
+            sampler=sampler,
+        )
+        reblur = self.render_from_trajectory(sharp, trajectory)
+        return crop_spatial(reblur, h, w), crop_spatial(trajectory, h, w)
 
 
 def build_pipeline(config, device):
@@ -859,7 +913,16 @@ def make_dataset(args, mode, augment):
 
 
 @torch.no_grad()
-def save_preview(pipeline, batch, output_dir, epoch, sample_steps, sampler):
+def save_preview(
+    pipeline,
+    batch,
+    output_dir,
+    epoch,
+    sample_steps,
+    sampler,
+    sample_pad_multiple,
+    sample_pad_mode,
+):
     # Save side-by-side evidence: sharp, real blur, synthetic/condition render, sampled reblur.
     pipeline.eval()
     sharp = batch["sharp"][:1]
@@ -880,6 +943,8 @@ def save_preview(pipeline, batch, output_dir, epoch, sample_steps, sampler):
         sharp,
         sample_steps=sample_steps,
         sampler=sampler,
+        pad_multiple=sample_pad_multiple,
+        pad_mode=sample_pad_mode,
     )
 
     preview_dir = Path(output_dir) / "previews" / f"epoch_{epoch:05d}"
@@ -906,6 +971,22 @@ def train(args):
         pin_memory=device.type == "cuda",
         drop_last=True,
     )
+    preview_loader = None
+    if args.preview_every > 0:
+        try:
+            preview_set = make_dataset(args, mode=args.dataset, augment=False)
+            preview_loader = DataLoader(
+                preview_set,
+                batch_size=1,
+                shuffle=True,
+                num_workers=args.num_workers,
+                pin_memory=device.type == "cuda",
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            logging.warning(
+                "full-size preview dataset unavailable (%s); using cropped training previews",
+                exc,
+            )
 
     config = config_from_args(args)
     pipeline = build_pipeline(config, device)
@@ -1008,13 +1089,20 @@ def train(args):
         )
 
         if args.preview_every > 0 and epoch % args.preview_every == 0:
+            preview_batch = (
+                next(iter(preview_loader))
+                if preview_loader is not None
+                else next(iter(train_loader))
+            )
             save_preview(
                 pipeline,
-                next(iter(train_loader)),
+                preview_batch,
                 args.output_dir,
                 epoch,
                 sample_steps=args.sample_steps,
                 sampler=args.sampler,
+                sample_pad_multiple=args.sample_pad_multiple,
+                sample_pad_mode=args.sample_pad_mode,
             )
 
         if args.save_every > 0 and (epoch % args.save_every == 0 or epoch == args.epochs):
@@ -1064,6 +1152,8 @@ def sample(args):
             sharp,
             sample_steps=args.sample_steps,
             sampler=args.sampler,
+            pad_multiple=args.sample_pad_multiple,
+            pad_mode=args.sample_pad_mode,
         )
 
         save_rgb(output_dir / "sharp" / f"{item_idx:05d}.png", sharp)
@@ -1096,7 +1186,12 @@ def self_test(args):
     condition_loss, _ = pipeline.compute_flow_matching_loss(sharp, condition)
     loss = fm_loss + reblur_loss + 0.0 * condition_loss
     loss.backward()
-    reblur, trajectory = pipeline.sample_reblur(sharp[:1], sample_steps=2, sampler="euler")
+    reblur, trajectory = pipeline.sample_reblur(
+        sharp[:1],
+        sample_steps=2,
+        sampler="euler",
+        pad_multiple=30,
+    )
 
     print("self_test ok")
     print(f"loss={loss.item():.6f}")
@@ -1164,6 +1259,20 @@ def build_arg_parser():
     parser.add_argument("--output_dir", default="./experiments/trajectory_flow_reblur")
     parser.add_argument("--max_samples", type=int, default=0)
     parser.add_argument("--save_trajectory_npy", action="store_true")
+    parser.add_argument(
+        "--sample_pad_multiple",
+        "--pad_multiple",
+        dest="sample_pad_multiple",
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--sample_pad_mode",
+        "--pad_mode",
+        dest="sample_pad_mode",
+        choices=["reflect", "replicate"],
+        default="reflect",
+    )
 
     # Runtime.
     parser.add_argument("--device", default=None)
@@ -1174,6 +1283,8 @@ def build_arg_parser():
 
 def main():
     args = build_arg_parser().parse_args()
+    if args.sample_pad_multiple is None:
+        args.sample_pad_multiple = args.crop_size
     if args.mode == "train":
         train(args)
     elif args.mode == "sample":
