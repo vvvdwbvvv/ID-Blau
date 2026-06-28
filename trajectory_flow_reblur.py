@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import math
 import os
 import random
@@ -55,6 +56,18 @@ def set_seed(seed):
 
 def ensure_dir(path):
     Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def setup_train_logging(output_dir):
+    log_path = Path(output_dir) / "train.log"
+    logging.basicConfig(
+        filename=str(log_path),
+        format="%(asctime)s %(levelname)s:%(message)s",
+        encoding="utf-8",
+        level=logging.INFO,
+        force=True,
+    )
+    return log_path
 
 
 def require_cv2():
@@ -880,6 +893,7 @@ def train(args):
     set_seed(args.seed)
     device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
     ensure_dir(args.output_dir)
+    log_path = setup_train_logging(args.output_dir)
     if args.fm_loss_weight <= 0 and args.reblur_loss_weight <= 0:
         raise ValueError("At least one of --fm_loss_weight or --reblur_loss_weight must be > 0")
 
@@ -915,9 +929,18 @@ def train(args):
     with open(Path(args.output_dir) / "config.json", "w") as f:
         json.dump(config, f, indent=2)
 
+    logging.info("train_log: %s", log_path)
+    logging.info("device: %s", device)
+    logging.info("args: %s", vars(args))
+    logging.info("config: %s", config)
+    logging.info("train_samples: %d", len(train_set))
+    logging.info("start_epoch: %d end_epoch: %d global_step: %d", start_epoch, args.epochs, global_step)
+
     for epoch in range(start_epoch, args.epochs + 1):
         pipeline.train()
         meter = 0.0
+        metric_totals = {}
+        num_batches = 0
         tq = tqdm.tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs}")
 
         for batch_idx, batch in enumerate(tq, start=1):
@@ -960,9 +983,29 @@ def train(args):
 
             global_step += 1
             meter += loss.item()
+            num_batches = batch_idx
+            for name, value in log_values.items():
+                metric_totals[name] = metric_totals.get(name, 0.0) + value
             log_values["loss"] = meter / batch_idx
             log_values["step"] = global_step
             tq.set_postfix(log_values)
+
+        if num_batches == 0:
+            raise RuntimeError(
+                "No training batches were produced. Lower --batch_size or add more training pairs."
+            )
+
+        epoch_metrics = {
+            name: total / num_batches for name, total in metric_totals.items()
+        }
+        logging.info(
+            "epoch=%d/%d step=%d loss=%.6f metrics=%s",
+            epoch,
+            args.epochs,
+            global_step,
+            meter / num_batches,
+            epoch_metrics,
+        )
 
         if args.preview_every > 0 and epoch % args.preview_every == 0:
             save_preview(
@@ -993,6 +1036,7 @@ def train(args):
                 config,
                 args,
             )
+            logging.info("saved checkpoint for epoch=%d", epoch)
 
 
 @torch.no_grad()
