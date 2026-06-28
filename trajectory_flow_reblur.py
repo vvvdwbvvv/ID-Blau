@@ -1,5 +1,4 @@
 import argparse
-import json
 import logging
 import math
 import os
@@ -17,6 +16,19 @@ try:
     import cv2
 except ModuleNotFoundError:
     cv2 = None
+
+
+TRAJECTORY_STEPS = 7
+MAX_MOTION_PIXELS = 32.0
+CLAMP_TRAJECTORY = True
+BASE_CHANNELS = 64
+TIME_DIM = 128
+NOISE_SCALE = 1.0
+T_EPS = 1e-3
+SYNTHETIC_MIN_MAGNITUDE = 0.05
+SYNTHETIC_MAX_MAGNITUDE = 1.0
+SYNTHETIC_LOCAL_JITTER = 0.15
+SYNTHETIC_LOWRES_GRID = 16
 
 
 """
@@ -824,53 +836,37 @@ class TrajectoryFlowReblur(nn.Module):
         return crop_spatial(reblur, h, w), crop_spatial(trajectory, h, w)
 
 
-def build_pipeline(config, device):
-    trajectory_channels = 2 * config["trajectory_steps"]
+def build_pipeline(device):
+    trajectory_channels = 2 * TRAJECTORY_STEPS
     velocity_model = TrajectoryVelocityUNet(
         trajectory_channels=trajectory_channels,
-        base_channels=config["base_channels"],
-        time_dim=config["time_dim"],
+        base_channels=BASE_CHANNELS,
+        time_dim=TIME_DIM,
     )
     pipeline = TrajectoryFlowReblur(
         velocity_model=velocity_model,
-        target_builder=ConditionMapToTrajectoryTarget(config["trajectory_steps"]),
+        target_builder=ConditionMapToTrajectoryTarget(TRAJECTORY_STEPS),
         synthetic_sampler=SyntheticTrajectorySampler(
-            trajectory_steps=config["trajectory_steps"],
-            min_magnitude=config.get("synthetic_min_magnitude", 0.05),
-            max_magnitude=config.get("synthetic_max_magnitude", 1.0),
-            local_jitter=config.get("synthetic_local_jitter", 0.15),
-            lowres_grid=config.get("synthetic_lowres_grid", 16),
+            trajectory_steps=TRAJECTORY_STEPS,
+            min_magnitude=SYNTHETIC_MIN_MAGNITUDE,
+            max_magnitude=SYNTHETIC_MAX_MAGNITUDE,
+            local_jitter=SYNTHETIC_LOCAL_JITTER,
+            lowres_grid=SYNTHETIC_LOWRES_GRID,
         ),
         projector=TrajectoryToKernelProjection(
-            trajectory_steps=config["trajectory_steps"],
-            max_motion_pixels=config["max_motion_pixels"],
-            clamp_trajectory=config["clamp_trajectory"],
+            trajectory_steps=TRAJECTORY_STEPS,
+            max_motion_pixels=MAX_MOTION_PIXELS,
+            clamp_trajectory=CLAMP_TRAJECTORY,
         ),
         renderer=PhysicalReblurRenderer(),
         refiner=IdentityImageRefinement(),
-        noise_scale=config["noise_scale"],
-        t_eps=config["t_eps"],
+        noise_scale=NOISE_SCALE,
+        t_eps=T_EPS,
     )
     return pipeline.to(device)
 
 
-def config_from_args(args):
-    return {
-        "trajectory_steps": args.trajectory_steps,
-        "max_motion_pixels": args.max_motion_pixels,
-        "clamp_trajectory": args.clamp_trajectory,
-        "base_channels": args.base_channels,
-        "time_dim": args.time_dim,
-        "noise_scale": args.noise_scale,
-        "t_eps": args.t_eps,
-        "synthetic_min_magnitude": args.synthetic_min_magnitude,
-        "synthetic_max_magnitude": args.synthetic_max_magnitude,
-        "synthetic_local_jitter": args.synthetic_local_jitter,
-        "synthetic_lowres_grid": args.synthetic_lowres_grid,
-    }
-
-
-def save_checkpoint(path, pipeline, optimizer, epoch, global_step, config, args):
+def save_checkpoint(path, pipeline, optimizer, epoch, global_step, args):
     ensure_dir(Path(path).parent)
     torch.save(
         {
@@ -878,7 +874,6 @@ def save_checkpoint(path, pipeline, optimizer, epoch, global_step, config, args)
             "optimizer_state": optimizer.state_dict() if optimizer is not None else None,
             "epoch": epoch,
             "global_step": global_step,
-            "config": config,
             "args": vars(args),
         },
         path,
@@ -887,7 +882,7 @@ def save_checkpoint(path, pipeline, optimizer, epoch, global_step, config, args)
 
 def load_pipeline_from_checkpoint(checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    pipeline = build_pipeline(checkpoint["config"], device)
+    pipeline = build_pipeline(device)
     pipeline.load_state_dict(checkpoint["model_state"])
     return pipeline, checkpoint
 
@@ -988,8 +983,7 @@ def train(args):
                 exc,
             )
 
-    config = config_from_args(args)
-    pipeline = build_pipeline(config, device)
+    pipeline = build_pipeline(device)
     optimizer = torch.optim.AdamW(
         pipeline.parameters(),
         lr=args.lr,
@@ -1007,13 +1001,9 @@ def train(args):
         start_epoch = checkpoint.get("epoch", 0) + 1
         global_step = checkpoint.get("global_step", 0)
 
-    with open(Path(args.output_dir) / "config.json", "w") as f:
-        json.dump(config, f, indent=2)
-
     logging.info("train_log: %s", log_path)
     logging.info("device: %s", device)
     logging.info("args: %s", vars(args))
-    logging.info("config: %s", config)
     logging.info("train_samples: %d", len(train_set))
     logging.info("start_epoch: %d end_epoch: %d global_step: %d", start_epoch, args.epochs, global_step)
 
@@ -1112,7 +1102,6 @@ def train(args):
                 optimizer,
                 epoch,
                 global_step,
-                config,
                 args,
             )
             save_checkpoint(
@@ -1121,7 +1110,6 @@ def train(args):
                 optimizer,
                 epoch,
                 global_step,
-                config,
                 args,
             )
             logging.info("saved checkpoint for epoch=%d", epoch)
@@ -1168,8 +1156,7 @@ def sample(args):
 def self_test(args):
     # Fast shape/gradient check that does not require the GoPro dataset.
     device = torch.device(args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu"))
-    config = config_from_args(args)
-    pipeline = build_pipeline(config, device)
+    pipeline = build_pipeline(device)
 
     sharp = torch.rand(2, 3, 64, 64, device=device) - 0.5
     blur = F.avg_pool2d(sharp, kernel_size=3, stride=1, padding=1)
@@ -1215,16 +1202,7 @@ def build_arg_parser():
     parser.add_argument("--flow_norm", type=lambda x: str(x).lower() != "false", default=True)
     parser.add_argument("--flow_norm_num", type=float, default=147.0)
 
-    # Module sizes.
-    parser.add_argument("--trajectory_steps", type=int, default=7)
-    parser.add_argument("--max_motion_pixels", type=float, default=32.0)
-    parser.add_argument("--clamp_trajectory", type=lambda x: str(x).lower() != "false", default=True)
-    parser.add_argument("--base_channels", type=int, default=64)
-    parser.add_argument("--time_dim", type=int, default=128)
-
     # Flow matching.
-    parser.add_argument("--noise_scale", type=float, default=1.0)
-    parser.add_argument("--t_eps", type=float, default=1e-3)
     parser.add_argument("--sample_steps", type=int, default=50)
     parser.add_argument("--sampler", choices=["euler", "heun"], default="heun")
     parser.add_argument(
@@ -1233,10 +1211,6 @@ def build_arg_parser():
         default="synthetic",
         help="synthetic is video-free; condition uses GOPRO_flow maps for prototype runs.",
     )
-    parser.add_argument("--synthetic_min_magnitude", type=float, default=0.05)
-    parser.add_argument("--synthetic_max_magnitude", type=float, default=1.0)
-    parser.add_argument("--synthetic_local_jitter", type=float, default=0.15)
-    parser.add_argument("--synthetic_lowres_grid", type=int, default=16)
 
     # Training.
     parser.add_argument("--epochs", type=int, default=100)
